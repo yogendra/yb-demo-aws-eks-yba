@@ -112,6 +112,7 @@ function k8s-delete-sc(){
 
 function k8s-create-cert-manager(){
   kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.13.1/cert-manager.yaml
+  kubectl wait pods -n cert-manager  -l app.kubernetes.io/component=webhook --for=condition=Ready
   kubectl apply -f $CERT_MANAGER_CONFIG
 }
 
