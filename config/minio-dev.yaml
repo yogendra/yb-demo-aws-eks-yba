@@ -1,0 +1,155 @@
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: minio-dev
+  namespace: yb-platform
+spec:
+  commonName: Minio Dev
+  secretName: minio-dev-tls
+  privateKey:
+    algorithm: RSA
+    encoding: PKCS1
+    size: 2048
+  usages:
+  - server auth
+  - client auth
+  dnsNames:
+  - localhost
+  - minio-dev.yb-platform.svc.cluster.local
+  - "*.minio-dev.yb-platform.svc.cluster.local"
+  ipAddresses:
+  - 127.0.0.1
+  issuerRef:
+    name: yb-platform-ica
+    kind: ClusterIssuer
+    group: cert-manager.io
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  labels:
+    app: minio-dev
+  name: minio-dev
+  namespace: yb-platform
+spec:
+  persistentVolumeClaimRetentionPolicy:
+    whenDeleted: Retain
+    whenScaled: Retain
+  podManagementPolicy: OrderedReady
+  replicas: 1
+  revisionHistoryLimit: 10
+  selector:
+    matchLabels:
+      app: minio-dev
+  serviceName: minio-dev
+  template:
+    metadata:
+      labels:
+        app: minio-dev
+    spec:
+      containers:
+      - image: quay.io/minio/minio:latest
+        name:  minio-dev
+        command:
+        - /bin/bash
+        - -c
+        args:
+        - minio server /data --console-address :9090 --certs-dir /certs
+        env:
+          - name: K8S_NS
+            valueFrom:
+              fieldRef:
+                fieldPath: metadata.namespace
+          - name:  K8S_DOMAIN
+            value: cluster.local
+          - name:  K8S_SERVICE
+            value: minio-dev
+          - name: MINIO_DOMAIN
+            value: "$(K8S_SERVICE).$(K8S_NS).svc.$(K8S_DOMAIN)"
+        volumeMounts:
+        - mountPath: /data
+          name: minio-storage
+        - mountPath: /certs
+          name: minio-certs
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 9090
+          name: console
+          protocol: TCP
+        - containerPort: 9000
+          name: s3
+          protocol: TCP
+        resources:
+          requests:
+            cpu: 1000m
+            memory: 4Gi
+          limits:
+            cpu: 1000m
+            memory: 4Gi
+      volumes:
+      - name: minio-storage
+        persistentVolumeClaim:
+          claimName: minio-dev
+      - name: minio-certs
+        projected:
+          defaultMode: 420
+          sources:
+          - secret:
+              items:
+              - key: ca.crt
+                path: ca.crt
+              - key: tls.crt
+                path: public.crt
+              - key: tls.key
+                path: private.key
+              name: minio-dev-tls
+  updateStrategy:
+    rollingUpdate:
+      partition: 0
+    type: RollingUpdate
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  finalizers:
+  - kubernetes.io/pvc-protection
+  labels:
+    app: minio-dev
+  name: minio-dev
+  namespace: yb-platform
+spec:
+  accessModes:
+  - ReadWriteOnce
+  resources:
+    requests:
+      storage: 100Gi
+  storageClassName: gp3
+  volumeMode: Filesystem
+---
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    app: minio-dev
+  name: minio-dev
+  namespace: yb-platform
+spec:
+  internalTrafficPolicy: Cluster
+  ipFamilies:
+  - IPv4
+  ipFamilyPolicy: SingleStack
+  ports:
+  - name: console
+    port: 9090
+    protocol: TCP
+    targetPort: 9090
+  - name: s3
+    port: 9000
+    protocol: TCP
+    targetPort: 9000
+  selector:
+    app: minio-dev
+  sessionAffinity: None
+  type: ClusterIP
+  clusterIP: "None"
+---
