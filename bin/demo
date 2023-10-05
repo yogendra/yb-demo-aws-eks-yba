@@ -7,9 +7,8 @@ PROJECT_CONFIG_DIR=${PROJECT_CONFIG_DIR:-$(cd $PROJECT_DIR/config; pwd)}
 
 PROJECT_ENV_FILE=${PROJECT_ENV_FILE:-$PROJECT_DIR/demo.env}
 [[ -f $PROJECT_ENV_FILE ]] && source $PROJECT_ENV_FILE
-
-export PROJECT_DOMAIN=${PROJECT_DOMAIN:-shr-eks-sg.apj.yugabyte.com}
-export AWS_HOSTEDZONE_ID=${AWS_HOSTEDZONE_ID:-Z04311021JK3VSZKS3Q9R}
+export PROJECT_DOMAIN=${PROJECT_DOMAIN?"must be set in config file"}
+export AWS_HOSTEDZONE_ID=${AWS_HOSTEDZONE_ID?"must be set in config file"}
 
 K8S_CLUSTER_CONFIG=${K8S_CLUSTER_CONFIG:-$PROJECT_CONFIG_DIR/shr-eks-sg.yaml}
 
@@ -18,23 +17,25 @@ INGRESS_NGINX_HELM_VALUES=${INGRESS_NGINX_HELM_VALUES:-$PROJECT_CONFIG_DIR/ingre
 CERT_MANAGER_CONFIG=${CERT_MANAGER_CONFIG:-$PROJECT_CONFIG_DIR/certs.yaml}
 
 YBA_HELM_VALUES=${YBA_HELM_VALUES:-$PROJECT_CONFIG_DIR/yugaware-values.yaml}
-YBA_LICENSE=${YB_LICENSE:-$PROJECT_CONFIG_DIR/yugabyte-yugaware-partner-apj-secret.yml}
+YBA_LICENSE=${YB_LICENSE:-$PROJECT_CONFIG_DIR/yugabyte-*-secret.yml}
 YBA_LICENSE_VALUE=$(jq -Rs < $YBA_LICENSE)
 YBA_K8S_STORAGECLASS=${YBA_K8S_STORAGECLASS:-gp3}
 YBA_NS=${YBA_NS:-yb-platform}
 YBA_HELM_RELEASE=${YBA_HELM_RELEASE:-yba}
 
-YBA_HOSTNAME=yba.$PROJECT_DOMAIN
-YBA_PORTAL=${YBA_PORTAL:-"https://$YBA_HOSTNAME"}
-YBA_API=${YBA_API:-$YBA_PORTAL/api/v1}
+YBA_HOSTNAME=${YBA_HOSTNAME:-yba.$PROJECT_DOMAIN}
+YBA_PROM_HOSTNAME=${YBA_PROM_HOSTNAME:-yba-prom.$PROJECT_DOMAIN}
+YBA_PORTAL=https://$YBA_HOSTNAME
+YBA_API=$YBA_PORTAL/api/v1
 YBA_USERNAME=${YBA_USERNAME:-superadmin@yugabyte.com}
 YBA_PASSWORD=${YBA_PASSWORD:-Password#123}
 YBA_BACKUP_BUCKET=${YBA_BACKUP_BUCKET:-yugabyte-apj-demo-backup}
 YBA_VERSION=${YBA_VERSION:-2.18.2.1-b1}
 YBA_HELM_VERSION=${YBA_HELM_VERSION:-2.18.2+1}
-YBA_K8S_PROVIDER_NAME=${YBA_K8S_PROVIDER_NAME:-shr-eks}
+YBA_K8S_PROVIDER_NAME=${YBA_K8S_PROVIDER_NAME:-shr-eks-sg}
 
 function yba-login(){
+
   YBA_AUTH_TOKEN=$(curl $YBA_API/login \
       -ksSL \
       -H content-type:application/json \
@@ -55,37 +56,46 @@ function yba-login(){
 }
 
 function start(){
+  banner "Start Demo"
   k8s-setup
   yba-setup
   yba-create-db
 }
 function stop(){
+  banner "Stop Demo"
   yba-delete-db
   yba-destroy
   k8s-destroy
 }
 function k8s-setup(){
+  banner "Setup K8s"
   k8s-create-cluster
   k8s-create-common-services
 }
 function k8s-destroy(){
+  banner "Destroy K8s"
   k8s-delete-common-services
   k8s-delete-cluster
 }
 function k8s-create-cluster(){
+  banner "Create K8s cluster"
   eksctl create cluster -f $K8S_CLUSTER_CONFIG
   kubectl config rename-context $(kubectl config current-context) shr-eks-sg
 }
 function k8s-delete-cluster(){
+  banner "Delete K8s Cluster"
   eksctl delete cluster -f $K8S_CLUSTER_CONFIG
+
 }
 
 function k8s-create-common-services(){
+  log "Create common K8s services"
   k8s-create-sc
   k8s-create-cert-manager
   k8s-create-ingress
 }
 function k8s-delete-common-services(){
+  log "Delete common K8s services"
   k8s-delete-ingress
   k8s-delete-cert-manager
   k8s-delete-sc
@@ -206,13 +216,16 @@ EOF
 function yba-setup(){
   yba-install
   yba-register-user
+  source $PROJECT_ENV_FILE
   yba-configure-cloud
   yba-configure-backup
   yba-configure-kms
   yba-info
 }
 function yba-destroy(){
-  helm delete $YBA_HELM_RELEASE -n $YBA_NS
+  yba-unregister-user
+  yba-uninstall
+
 }
 
 function yba-install(){
@@ -229,23 +242,16 @@ function yba-install(){
     -n $YBA_NS \
     --version $YBA_HELM_VERSION \
     -f $YBA_HELM_VALUES \
-    --set "yugaware.additionAllowedCorsOrigins={https://yba.$PROJECT_DOMAIN,http://yba.$PROJECT_DOMAIN}" \
+    --set "yugaware.additionAllowedCorsOrigins={https://$YBA_HOSTNAME,http://$YBA_HOSTNAME}" \
     --wait
 
   cat $PROJECT_CONFIG_DIR/yba-ingress.template.yaml | envsubst | kubectl apply -n $YBA_NS -f-
 
-  export YBA_PORTAL="https://yba.$PROJECT_DOMAIN"
-  export YBA_API=$YBA_PORTAL/api/v1
-
-  add-config YBA_PORTAL $YBA_PORTAL
-  add-config YBA_API $YBA_API
-
-
   log "Wait for pods to be ready"
-  kubectl wait --for=condition=Ready pods  -l app=$YBA_HELM_RELEASE-yugaware -n $YBA_NS
+  kubectl wait --timeout=60s --for=condition=Ready pods  -l app=$YBA_HELM_RELEASE-yugaware -n $YBA_NS
 
   log "Wait for ingress to be configured with LB"
-  kubectl wait --for=jsonpath='{.status.loadBalancer.ingress}'  ingress/$YBA_HELM_RELEASE  -n yb-platform
+  kubectl wait --timeout=120s --for=jsonpath='{.status.loadBalancer.ingress}'  ingress/$YBA_HELM_RELEASE  -n yb-platform
 
   log "Wait for YBA API to be ready"
   until  curl -m1 -fksSL $YBA_API/app_version &>> /dev/null
@@ -254,6 +260,19 @@ function yba-install(){
     sleep 1
   done
 
+}
+function yba-uninstall(){
+  log Remove ingress
+  cat $PROJECT_CONFIG_DIR/yba-ingress.template.yaml | envsubst | kubectl delete -n $YBA_NS -f-
+
+  log Uninstall YBA
+  helm delete $YBA_HELM_RELEASE -n $YBA_NS
+
+  log Delete YBA License
+  kubectl delete -n $YBA_NS -f $YBA_LICENSE
+
+  log Delet YBA Namespace
+  kubectl delete ns $YBA_NS
 }
 
 function yba-register-user(){
@@ -271,8 +290,9 @@ function yba-register-user(){
 EOF
   )
 
-  if [[ $(curl $YBA_API/customer_count -sSL | jq '.count') -eq 0 ]]
+  if [[ $(curl $YBA_API/customer_count -ksSL | jq '.count') -eq 0 ]]
   then
+    log "Registering User"
     REGISTER_RESPONSE_JSON=$(curl $YBA_API/register?generateApiToken=true \
       -ksSL \
       -H 'Accept: application/json' \
@@ -285,6 +305,7 @@ EOF
     YBA_USER_UUID=$(echo $REGISTER_RESPONSE_JSON | jq -rcM '.userUUID')
     YBA_AUTH_HEADER=X-AUTH-YW-API-TOKEN:$YBA_API_TOKEN
   else
+    log "Skipping registration"
     YBA_AUTH_TOKEN=$(curl $YBA_API/login \
       -ksSL \
       -H 'Accept: application/json' \
@@ -306,14 +327,28 @@ EOF
     YBA_USER_UUID=$(echo $SESSION_INFO_RESPONSE_JSON | jq -rcM '.userUUID')
     YBA_AUTH_HEADER=X-AUTH-YW-API-TOKEN:$YBA_API_TOKEN
   fi
-  add-config YBA_API_TOKEN $YBA_API_TOKEN
-  add-config YBA_CUSTOMER_UUID $YBA_CUSTOMER_UUID
-  add-config YBA_CUSTOMER_API=$YBA_API/customers/$YBA_CUSTOMER_UUID
-  add-config YBA_USER_UUID $YBA_USER_UUID
-  add-config YBA_AUTH_HEADER $YBA_AUTH_HEADER
-  export YBA_API_TOKEN YBA_CUSTOMER_UUID YBA_USER_UUID YBA_AUTH_HEADER
+  set-config YBA_HOSTNAME $YBA_HOSTNAME
+  set-config YBA_PORTAL $YBA_PORTAL
+  set-config YBA_API $YBA_API
+  set-config YBA_API_TOKEN $YBA_API_TOKEN
+  set-config YBA_CUSTOMER_UUID $YBA_CUSTOMER_UUID
+  set-config YBA_CUSTOMER_API $YBA_API/customers/$YBA_CUSTOMER_UUID
+  set-config YBA_USER_UUID $YBA_USER_UUID
+  set-config YBA_AUTH_HEADER $YBA_AUTH_HEADER
+  export YBA_HOSTNAME YBA_PORTAL YBA_API YBA_API_TOKEN YBA_CUSTOMER_UUID YBA_CUSTOMER_API YBA_USER_UUID YBA_AUTH_HEADER
+  log "User registration done"
 }
-
+function yba-unregister-user(){
+  log "Cleanup User config"
+  unset-config YBA_HOSTNAME
+  unset-config YBA_PORTAL
+  unset-config YBA_API
+  unset-config YBA_API_TOKEN
+  unset-config YBA_CUSTOMER_UUID
+  unset-config YBA_CUSTOMER_API
+  unset-config YBA_USER_UUID
+  unset-config YBA_AUTH_HEADER
+}
 function yba-configure-cloud(){
   log "YBA Configure cloud"
   YBA_K8S_PROVIDER_REQUEST_JSON=$(cat <<EOF | jq -cM
@@ -439,52 +474,16 @@ EOF
     --compressed
   )
 }
-function yba-info(){
-  # yba-login
-  cat <<EOF
-Summary
-===============
 
-Portal        : $YBA_PORTAL
-API           : $YBA_API
-Customer UUID : $YBA_CUSTOMER_UUID
-User UUID     : $YBA_USER_UUID
-API Token     : $YBA_API_TOKEN
-Username      : $YBA_USERNAME
-Password      : $YBA_PASSWORD
-
-
-Sample API Call
-===============
-
-curl \\
-  -ksSL \\
-  -H 'Accept: application/json' \\
-  -H 'Content-Type: application/json;charset=UTF-8' \\
-  -H '$YBA_AUTH_HEADER' \\
-  $YBA_API/session_info
-
-EOF
-
-}
-
-function log(){
-  echo $(date +"[%Y-%m-%d %H:%m:%S]") "$@"
-}
-function banner(){
-  cat <<EOF
-========================================================================
-$@
-========================================================================
-EOF
-}
 
 function yba-create-db(){
+  banner "Create DB"
   yba-create-universe db1 $YBA_K8S_PROVIDER_NAME
   yba-create-universe db2 $YBA_K8S_PROVIDER_NAME
   yba-create-universe db3 $YBA_K8S_PROVIDER_NAME
 }
 function yba-delete-db(){
+  banner "Delete DB"
   yba-delete-universe db1
   yba-delete-universe db2
   yba-delete-universe db3
@@ -493,6 +492,7 @@ function yba-create-universe(){
   export DB_NAME=$1;shift
   export PROVIDER_NAME=$1;shift
   export YB_VERSION=${YB_VERSION:-$YBA_VERSION}
+  log "$DB_NAME: Create universe P: $PROVIDER_NAME V: $YB_VERSION"
   PROVIDER=$(curl $YBA_CUSTOMER_API/providers?name=$PROVIDER_NAME \
     -ksSL \
     -H 'Accept: application/json'  \
@@ -540,6 +540,7 @@ function yba-create-universe(){
 
 function yba-delete-universe(){
   export DB_NAME=$1;shift
+  log "$DB_NAME: Delete Universe"
   UNIVERSE_UUID=$(curl $YBA_CUSTOMER_API/universes?name=$DB_NAME \
     -ksSL \
     -H 'Accept: application/json'  \
@@ -580,15 +581,63 @@ function yba-wait-for-task(){
     sleep 1
   done
 }
-function add-config(){
+function set-config(){
   key=$1;shift
   value="$@"; shift
   [[ -f $PROJECT_ENV_FILE ]]  || touch $PROJECT_ENV_FILE
   config=$(cat $PROJECT_ENV_FILE)
   config="$(echo "$config" | grep -v "export $key=" | sort)"
+  if [[ -n $value ]]; then
   cat <<EOF | sort > $PROJECT_ENV_FILE
 $config
 export $key="$value"
+EOF
+  else
+  cat <<EOF | sort > $PROJECT_ENV_FILE
+$config
+EOF
+  fi
+}
+function unset-config(){
+  key=$1;shift
+  set-config $key ""
+}
+function yba-info(){
+  cat <<EOF
+Summary
+===============
+
+Portal        : $YBA_PORTAL
+API           : $YBA_API
+Customer UUID : $YBA_CUSTOMER_UUID
+User UUID     : $YBA_USER_UUID
+API Token     : $YBA_API_TOKEN
+Username      : $YBA_USERNAME
+Password      : $YBA_PASSWORD
+
+
+Sample API Call
+===============
+
+curl \\
+  -ksSL \\
+  -H 'Accept: application/json' \\
+  -H 'Content-Type: application/json;charset=UTF-8' \\
+  -H '$YBA_AUTH_HEADER' \\
+  $YBA_API/session_info
+
+EOF
+}
+
+function log(){
+  echo $(date +"[%Y-%m-%d %H:%m:%S]") "$@"
+}
+
+function banner(){
+  cat <<EOF
+========================================================================
+$@
+========================================================================
 EOF
 }
 
