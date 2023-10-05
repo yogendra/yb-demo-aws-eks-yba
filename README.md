@@ -5,15 +5,19 @@ This is a demo project to get YBA running on an eks cluster.
 ## Pre-requisite
 
 1. AWS Route53 Hosted Zone
-2. Existing VPC with 3 AZ (with private subnet)
-3. Private subnets are tagged for ELB
+2. Existing VPC with 3 AZ and  private subnets
+3. Private subnets are tagged for ELB ([read here](https://docs.aws.amazon.com/eks/latest/userguide/network-load-balancing.html))
 4. Internet access
-5. kubectl
-6. jq
-7. envsubst
-8. helm
-9. aws cli
 
+### Tools
+1. bash
+2. direnv
+3. k9s
+4. kubectl
+5. jq
+6. envsubst
+7. helm
+8. aws cli
 
 ## Quick start
 
