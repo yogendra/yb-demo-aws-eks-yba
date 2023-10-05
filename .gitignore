@@ -1,0 +1,5 @@
+.envrc-private
+demo.env
+config/yb-platform-ca.crt
+config/yugabyte-yugaware-partner-apj-secret.yml
+.kubeconfig
