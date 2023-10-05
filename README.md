@@ -41,14 +41,18 @@ This is a demo project to get YBA running on an eks cluster.
    6. `managedNodeGroups[0].securityGroups.attachIDs[*]`: Put correct security group id (as array)
    7. `managedNodeGroups[0].tags`: Put correct tags
 
-4. Edit file and set the `PROJECT_DOMAIN` and `AWS_HOSTEDZONE_ID`
+4. Put YugabyteDB Anywhere license file (Image Pull Secret) in the `config/` directory. Name is like `yugabyte-pull-secret.yaml`
+
+5. Edit file and set the `PROJECT_DOMAIN` and `AWS_HOSTEDZONE_ID`
 
     ```bash
     export AWS_HOSTEDZONE_ID=Z04311021JK3VSZKS3Q9R
     export PROJECT_DOMAIN=shr-eks-sg.apj.yugabyte.com
+    export YBA_AWS_ACCESS_KEY_ID=A******************6
+    export YBA_AWS_SECRET_ACCESS_KEY="4**************************************t"
     ```
 
-5. Start cluster
+6. Start cluster
 
     ```bash
     bin/demo start
@@ -68,7 +72,7 @@ This is a demo project to get YBA running on an eks cluster.
     10. Configures YBA KMS to AWS KMS
     11. Create 3 xsmall DBs (db1, db2 and db3)
 
-6. Destroy / Cleanup
+7. Destroy / Cleanup
 
     ```bash
     bin/demo stop
@@ -83,8 +87,10 @@ Following configuration parameters can be put in the `demo.env` file, next to th
 
 | Variable                  | Description                                     | Default                                       |
 | ------------------------- | ----------------------------------------------- | --------------------------------------------- |
-| PROJECT_DOMAIN            | (Required) Domain for the project.              |                                               |
-| AWS_HOSTEDZONE_ID         | (Required) Hosted AWS Zone                      |                                               |
+| PROJECT_DOMAIN            | **(Required)** Domain for the project.          |                                               |
+| AWS_HOSTEDZONE_ID         | **(Required)** Hosted AWS Zone                  |                                               |
+| YBA_AWS_ACCESS_KEY_ID     | **(Required)** YBA AWS Access Key ID            |                                               |
+| YBA_AWS_SECRET_ACCESS_KEY | **(Required)** YBA AWS Secret Access Key        |                                               |
 | CERT_MANAGER_CONFIG       | Config file for cert-manager based certificates | $PROJECT_CONFIG_DIR/certs.yaml                |
 | INGRESS_NGINX_HELM_VALUES | NGINX Ingress Helm Values file                  | $PROJECT_CONFIG_DIR/ingress-nginx-values.yaml |
 | K8S_CLUSTER_CONFIG        | EKS Cluster config                              | $PROJECT_CONFIG_DIR/shr-eks-sg.yaml           |
