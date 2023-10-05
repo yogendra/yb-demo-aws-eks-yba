@@ -1,0 +1,596 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+SCRIPT_DIR=$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )
+SCRIPT=${BASH_SOURCE[0]}
+PROJECT_DIR=${PROJECT_DIR:-$(cd $SCRIPT_DIR/..; pwd)}
+PROJECT_CONFIG_DIR=${PROJECT_CONFIG_DIR:-$(cd $PROJECT_DIR/config; pwd)}
+
+PROJECT_ENV_FILE=${PROJECT_ENV_FILE:-$PROJECT_DIR/demo.env}
+[[ -f $PROJECT_ENV_FILE ]] && source $PROJECT_ENV_FILE
+
+export PROJECT_DOMAIN=${PROJECT_DOMAIN:-shr-eks-sg.apj.yugabyte.com}
+export AWS_HOSTEDZONE_ID=${AWS_HOSTEDZONE_ID:-Z04311021JK3VSZKS3Q9R}
+
+K8S_CLUSTER_CONFIG=${K8S_CLUSTER_CONFIG:-$PROJECT_CONFIG_DIR/shr-eks-sg.yaml}
+
+INGRESS_NGINX_HELM_VALUES=${INGRESS_NGINX_HELM_VALUES:-$PROJECT_CONFIG_DIR/ingress-nginx-values.yaml}
+
+CERT_MANAGER_CONFIG=${CERT_MANAGER_CONFIG:-$PROJECT_CONFIG_DIR/certs.yaml}
+
+YBA_HELM_VALUES=${YBA_HELM_VALUES:-$PROJECT_CONFIG_DIR/yugaware-values.yaml}
+YBA_LICENSE=${YB_LICENSE:-$PROJECT_CONFIG_DIR/yugabyte-yugaware-partner-apj-secret.yml}
+YBA_LICENSE_VALUE=$(jq -Rs < $YBA_LICENSE)
+YBA_K8S_STORAGECLASS=${YBA_K8S_STORAGECLASS:-gp3}
+YBA_NS=${YBA_NS:-yb-platform}
+YBA_HELM_RELEASE=${YBA_HELM_RELEASE:-yba}
+
+YBA_HOSTNAME=yba.$PROJECT_DOMAIN
+YBA_PORTAL=${YBA_PORTAL:-"https://$YBA_HOSTNAME"}
+YBA_API=${YBA_API:-$YBA_PORTAL/api/v1}
+YBA_USERNAME=${YBA_USERNAME:-superadmin@yugabyte.com}
+YBA_PASSWORD=${YBA_PASSWORD:-Password#123}
+YBA_BACKUP_BUCKET=${YBA_BACKUP_BUCKET:-yugabyte-apj-demo-backup}
+YBA_VERSION=${YBA_VERSION:-2.18.2.1-b1}
+YBA_HELM_VERSION=${YBA_HELM_VERSION:-2.18.2+1}
+YBA_K8S_PROVIDER_NAME=${YBA_K8S_PROVIDER_NAME:-shr-eks}
+
+function yba-login(){
+  YBA_AUTH_TOKEN=$(curl $YBA_API/login \
+      -ksSL \
+      -H content-type:application/json \
+      -X POST \
+      -d "{\"emai\":\"$YBA_USERNAME\",\"passwor\":\"$YBA_PASSWOR\" }"  \
+      | jq -r '.authToken'
+  )
+  SESSION_INFO_RESPONSE_JSON=$(curl $YBA_API/session_info
+    -ksSL \
+    -H content-type:application/json \
+    -H "X-AUTH-TOKEN:$YBA_AUTH_TOKEN"
+  )
+  export YBA_API=$YBA_API
+  export YBA_API_TOKEN=$(echo $SESSION_INFO_RESPONSE_JSON | jq -rcM '.apiToken')
+  export YBA_CUSTOMER_UUID=$(echo $SESSION_INFO_RESPONSE_JSON | jq -rcM '.customerUUID')
+  export YBA_USER_UUID=$(echo $SESSION_INFO_RESPONSE_JSON | jq -rcM '.userUUID')
+  export YBA_AUTH_HEADER=X-AUTH-YW-API-TOKEN:$YBA_API_TOKEN
+}
+
+function start(){
+  k8s-setup
+  yba-setup
+  yba-create-db
+}
+function stop(){
+  yba-delete-db
+  yba-destroy
+  k8s-destroy
+}
+function k8s-setup(){
+  k8s-create-cluster
+  k8s-create-common-services
+}
+function k8s-destroy(){
+  k8s-delete-common-services
+  k8s-delete-cluster
+}
+function k8s-create-cluster(){
+  eksctl create cluster -f $K8S_CLUSTER_CONFIG
+  kubectl config rename-context $(kubectl config current-context) shr-eks-sg
+}
+function k8s-delete-cluster(){
+  eksctl delete cluster -f $K8S_CLUSTER_CONFIG
+}
+
+function k8s-create-common-services(){
+  k8s-create-sc
+  k8s-create-cert-manager
+  k8s-create-ingress
+}
+function k8s-delete-common-services(){
+  k8s-delete-ingress
+  k8s-delete-cert-manager
+  k8s-delete-sc
+}
+
+function k8s-create-sc(){
+  log "Create SC: gp3"
+  kubectl apply -f $PROJECT_CONFIG_DIR/gp3.yaml
+}
+function k8s-delete-sc(){
+  log "Delete SC: gp3"
+  kubectl delete -f $PROJECT_CONFIG_DIR/gp3.yaml
+}
+
+function k8s-create-cert-manager(){
+  kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.13.1/cert-manager.yaml
+  kubectl apply -f $CERT_MANAGER_CONFIG
+}
+
+function k8s-delete-cert-manager(){
+  kubectl delete -f $CERT_MANAGER_CONFIG
+  kubectl delete -f https://github.com/cert-manager/cert-manager/releases/download/v1.13.1/cert-manager.yaml
+}
+
+function k8s-create-ingress(){
+  log "Setup ingress"
+  helm upgrade --install  ingress-nginx -n ingress-nginx --create-namespace ingress-nginx/ingress-nginx -f $INGRESS_NGINX_HELM_VALUES
+
+  log "Wait for ingress LB address"
+  kubectl wait --for=jsonpath='{.status.loadBalancer.ingress}'  service/ingress-nginx-controller  -n ingress-nginx
+
+  INGRESS_CONTROLLER_ADDRESS=$(kubectl get service  -n ingress-nginx  ingress-nginx-controller -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')
+
+  DNS_CHANGE=$(cat<<EOF | jq -Mc
+  {
+    "Comment": "Update $PROJECT_DOMAIN",
+    "Changes": [
+      {
+        "Action": "UPSERT",
+        "ResourceRecordSet": {
+          "Name": "$PROJECT_DOMAIN",
+          "Type": "CNAME",
+          "TTL": 30,
+          "ResourceRecords": [
+            {
+              "Value": "$INGRESS_CONTROLLER_ADDRESS"
+            }
+          ]
+        }
+      },
+      {
+        "Action": "UPSERT",
+        "ResourceRecordSet": {
+          "Name": "*.$PROJECT_DOMAIN",
+          "Type": "CNAME",
+          "TTL": 30,
+          "ResourceRecords": [
+            {
+              "Value": "$INGRESS_CONTROLLER_ADDRESS"
+            }
+          ]
+        }
+      }
+    ]
+  }
+EOF
+  )
+  aws route53 change-resource-record-sets --hosted-zone-id $AWS_HOSTEDZONE_ID  --change-batch "$DNS_CHANGE"
+
+  log "Wait for Ingress DNS"
+  until nslookup test.$PROJECT_DOMAIN &> /dev/null
+  do
+    echo -n "."
+    sleep 1
+  done
+}
+function  k8s-delete-ingress(){
+  INGRESS_CONTROLLER_ADDRESS=$(kubectl get service  -n ingress-nginx  ingress-nginx-controller -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')
+  DNS_CHANGE=$(cat<<EOF | jq -Mc
+  {
+    "Comment": "Update $PROJECT_DOMAIN",
+    "Changes": [
+      {
+        "Action": "DELETE",
+        "ResourceRecordSet": {
+          "Name": "$PROJECT_DOMAIN",
+          "Type": "CNAME",
+          "TTL": 30,
+          "ResourceRecords": [
+            {
+              "Value": "$INGRESS_CONTROLLER_ADDRESS"
+            }
+          ]
+        }
+      },
+      {
+        "Action": "DELETE",
+        "ResourceRecordSet": {
+          "Name": "*.$PROJECT_DOMAIN",
+          "Type": "CNAME",
+          "TTL": 30,
+          "ResourceRecords": [
+            {
+              "Value": "$INGRESS_CONTROLLER_ADDRESS"
+            }
+          ]
+        }
+      }
+    ]
+  }
+EOF
+  )
+  aws route53 change-resource-record-sets --hosted-zone-id $AWS_HOSTEDZONE_ID  --change-batch "$DNS_CHANGE"
+
+  helm delete ingress-nginx -n ingress-nginx
+}
+
+function yba-setup(){
+  yba-install
+  yba-register-user
+  yba-configure-cloud
+  yba-configure-backup
+  yba-configure-kms
+  yba-info
+}
+function yba-destroy(){
+  helm delete $YBA_HELM_RELEASE -n $YBA_NS
+}
+
+function yba-install(){
+  banner "Install YBA"
+  log "Create NS"
+  kubectl create ns $YBA_NS || echo "NS($YBA_NS) exists"
+
+  log "Setup license"
+  kubectl apply -n $YBA_NS -f $YBA_LICENSE
+
+  log "Install YBA"
+  helm upgrade --install \
+    $YBA_HELM_RELEASE yugabytedb/yugaware \
+    -n $YBA_NS \
+    --version $YBA_HELM_VERSION \
+    -f $YBA_HELM_VALUES \
+    --set "yugaware.additionAllowedCorsOrigins={https://yba.$PROJECT_DOMAIN,http://yba.$PROJECT_DOMAIN}" \
+    --wait
+
+  cat $PROJECT_CONFIG_DIR/yba-ingress.template.yaml | envsubst | kubectl apply -n $YBA_NS -f-
+
+  export YBA_PORTAL="https://yba.$PROJECT_DOMAIN"
+  export YBA_API=$YBA_PORTAL/api/v1
+
+  add-config YBA_PORTAL $YBA_PORTAL
+  add-config YBA_API $YBA_API
+
+
+  log "Wait for pods to be ready"
+  kubectl wait --for=condition=Ready pods  -l app=$YBA_HELM_RELEASE-yugaware -n $YBA_NS
+
+  log "Wait for ingress to be configured with LB"
+  kubectl wait --for=jsonpath='{.status.loadBalancer.ingress}'  ingress/$YBA_HELM_RELEASE  -n yb-platform
+
+  log "Wait for YBA API to be ready"
+  until  curl -m1 -fksSL $YBA_API/app_version &>> /dev/null
+  do
+    echo -n "."
+    sleep 1
+  done
+
+}
+
+function yba-register-user(){
+  log "YBA Register user"
+
+  REGISTER_REQUEST_JSON=$(cat <<-EOF | jq -cM
+{
+  "code": "demo",
+  "name": "Super Admin",
+  "email": "$YBA_USERNAME",
+  "password": "$YBA_PASSWORD",
+  "confirmPassword":"$YBA_PASSWORD",
+  "confirmEULA": true
+}
+EOF
+  )
+
+  if [[ $(curl $YBA_API/customer_count -sSL | jq '.count') -eq 0 ]]
+  then
+    REGISTER_RESPONSE_JSON=$(curl $YBA_API/register?generateApiToken=true \
+      -ksSL \
+      -H 'Accept: application/json' \
+      -H 'Content-Type: application/json;charset=UTF-8' \
+      -X POST \
+      -d "$REGISTER_REQUEST_JSON"
+    )
+    YBA_API_TOKEN=$(echo $REGISTER_RESPONSE_JSON | jq -rcM '.apiToken')
+    YBA_CUSTOMER_UUID=$(echo $REGISTER_RESPONSE_JSON | jq -rcM '.customerUUID')
+    YBA_USER_UUID=$(echo $REGISTER_RESPONSE_JSON | jq -rcM '.userUUID')
+    YBA_AUTH_HEADER=X-AUTH-YW-API-TOKEN:$YBA_API_TOKEN
+  else
+    YBA_AUTH_TOKEN=$(curl $YBA_API/login \
+      -ksSL \
+      -H 'Accept: application/json' \
+      -H 'Content-Type: application/json;charset=UTF-8' \
+      -X POST \
+      -d "{\"email\":\"$YBA_USERNAME\",\"password\":\"$YBA_PASSWORD\"}"  \
+      | jq -r '.authToken'
+    )
+
+    SESSION_INFO_RESPONSE_JSON=$(curl $YBA_API/session_info \
+      -ksSL \
+      -H 'Accept: application/json' \
+      -H 'Content-Type: application/json;charset=UTF-8' \
+      -H "X-AUTH-TOKEN:$YBA_AUTH_TOKEN"
+    )
+
+    YBA_API_TOKEN=$(echo $SESSION_INFO_RESPONSE_JSON | jq -rcM '.apiToken')
+    YBA_CUSTOMER_UUID=$(echo $SESSION_INFO_RESPONSE_JSON | jq -rcM '.customerUUID')
+    YBA_USER_UUID=$(echo $SESSION_INFO_RESPONSE_JSON | jq -rcM '.userUUID')
+    YBA_AUTH_HEADER=X-AUTH-YW-API-TOKEN:$YBA_API_TOKEN
+  fi
+  add-config YBA_API_TOKEN $YBA_API_TOKEN
+  add-config YBA_CUSTOMER_UUID $YBA_CUSTOMER_UUID
+  add-config YBA_CUSTOMER_API=$YBA_API/customers/$YBA_CUSTOMER_UUID
+  add-config YBA_USER_UUID $YBA_USER_UUID
+  add-config YBA_AUTH_HEADER $YBA_AUTH_HEADER
+  export YBA_API_TOKEN YBA_CUSTOMER_UUID YBA_USER_UUID YBA_AUTH_HEADER
+}
+
+function yba-configure-cloud(){
+  log "YBA Configure cloud"
+  YBA_K8S_PROVIDER_REQUEST_JSON=$(cat <<EOF | jq -cM
+  {
+    "code": "kubernetes",
+    "name": "$YBA_K8S_PROVIDER_NAME",
+    "details": {
+      "airGapInstall": true,
+      "cloudInfo": {
+        "kubernetes": {
+          "kubernetesImageRegistry": "quay.io/yugabyte/yugabyte",
+          "kubernetesProvider": "eks",
+          "kubernetesPullSecretContent": $YBA_LICENSE_VALUE,
+          "kubernetesPullSecretName": "yugabyte-k8s-pull-secret",
+          "kubernetesImagePullSecretName": "yugabyte-k8s-pull-secret"
+        }
+      }
+    },
+    "regions": [
+      {
+        "code": "ap-southeast-1",
+        "name": "Asia Pacific (Singapore)",
+        "zones": [
+          {
+            "code": "ap-southeast-1a",
+            "name": "ap-southeast-1a",
+            "details": {
+              "cloudInfo": {
+                "kubernetes": {
+                  "kubernetesStorageClass": "$YBA_K8S_STORAGECLASS"
+                }
+              }
+            }
+          },
+          {
+            "code": "ap-southeast-1c",
+            "name": "ap-southeast-1c",
+            "details": {
+              "cloudInfo": {
+                "kubernetes": {
+                  "kubernetesStorageClass": "$YBA_K8S_STORAGECLASS"
+                }
+              }
+            }
+          },
+          {
+            "code": "ap-southeast-1b",
+            "name": "ap-southeast-1b",
+            "details": {
+              "cloudInfo": {
+                "kubernetes": {
+                  "kubernetesStorageClass": "$YBA_K8S_STORAGECLASS"
+                }
+              }
+            }
+          }
+        ],
+        "details": {
+          "cloudInfo": {
+            "kubernetes": {}
+          }
+        }
+      }
+    ]
+  }
+EOF
+  )
+  YBA_K8S_PROVIDER_RESPONSE_JSON=$(curl $YBA_CUSTOMER_API/providers?validate=false \
+    -ksSL \
+    -H 'Accept: application/json' \
+    -H 'Content-Type: application/json;charset=UTF-8' \
+    -H $YBA_AUTH_HEADER \
+    --data-raw "$YBA_K8S_PROVIDER_REQUEST_JSON" \
+    --compressed
+  )
+  # YBA_K8S_PROVIDER_UUID=$(echo "$YBA_K8S_PROVIDER_RESPONSE_JSON" | jq -r '.resourceUUID' )
+}
+
+function yba-configure-backup(){
+  log "Config Backup"
+  YBA_BACKUP_CONFIG_REQUEST=$(cat <<EOF | jq -cM
+  {
+    "configName": "aws-s3",
+    "data": {
+      "BACKUP_LOCATION": "s3://$YBA_BACKUP_BUCKET",
+      "IAM_INSTANCE_PROFILE": "false",
+      "AWS_ACCESS_KEY_ID": "$YBA_AWS_ACCESS_KEY_ID",
+      "AWS_SECRET_ACCESS_KEY": "$YBA_AWS_SECRET_ACCESS_KEY"
+    },
+    "name": "S3",
+    "type": "STORAGE"
+  }
+EOF
+  )
+  YBA_BACKUP_CONFIG_RESPONSE_JSON=$(curl $YBA_CUSTOMER_API/configs \
+    -ksSL \
+    -H 'Accept: application/json' \
+    -H 'Content-Type: application/json;charset=UTF-8' \
+    -H $YBA_AUTH_HEADER \
+    --data-raw "$YBA_BACKUP_CONFIG_REQUEST" \
+    --compressed
+  )
+}
+
+function yba-configure-kms(){
+  log "Config KMS"
+  YBA_KMS_CONFIG_REQUEST=$(cat <<EOF | jq -cM
+  {
+    "name":"aws-kms",
+    "AWS_ACCESS_KEY_ID": "$YBA_AWS_ACCESS_KEY_ID",
+    "AWS_SECRET_ACCESS_KEY": "$YBA_AWS_SECRET_ACCESS_KEY",
+    "AWS_REGION":"ap-southeast-1"
+  }
+EOF
+  )
+
+  YBA_KMS_CONFIG_RESPONSE_JSON=$(curl $YBA_CUSTOMER_API/kms_configs/AWS \
+    -ksSL \
+    -H 'Accept: application/json' \
+    -H 'Content-Type: application/json;charset=UTF-8' \
+    -H $YBA_AUTH_HEADER \
+    --data-raw "$YBA_KMS_CONFIG_REQUEST" \
+    --compressed
+  )
+}
+function yba-info(){
+  # yba-login
+  cat <<EOF
+Summary
+===============
+
+Portal        : $YBA_PORTAL
+API           : $YBA_API
+Customer UUID : $YBA_CUSTOMER_UUID
+User UUID     : $YBA_USER_UUID
+API Token     : $YBA_API_TOKEN
+Username      : $YBA_USERNAME
+Password      : $YBA_PASSWORD
+
+
+Sample API Call
+===============
+
+curl \\
+  -ksSL \\
+  -H 'Accept: application/json' \\
+  -H 'Content-Type: application/json;charset=UTF-8' \\
+  -H '$YBA_AUTH_HEADER' \\
+  $YBA_API/session_info
+
+EOF
+
+}
+
+function log(){
+  echo $(date +"[%Y-%m-%d %H:%m:%S]") "$@"
+}
+function banner(){
+  cat <<EOF
+========================================================================
+$@
+========================================================================
+EOF
+}
+
+function yba-create-db(){
+  yba-create-universe db1 $YBA_K8S_PROVIDER_NAME
+  yba-create-universe db2 $YBA_K8S_PROVIDER_NAME
+  yba-create-universe db3 $YBA_K8S_PROVIDER_NAME
+}
+function yba-delete-db(){
+  yba-delete-universe db1
+  yba-delete-universe db2
+  yba-delete-universe db3
+}
+function yba-create-universe(){
+  export DB_NAME=$1;shift
+  export PROVIDER_NAME=$1;shift
+  export YB_VERSION=${YB_VERSION:-$YBA_VERSION}
+  PROVIDER=$(curl $YBA_CUSTOMER_API/providers?name=$PROVIDER_NAME \
+    -ksSL \
+    -H 'Accept: application/json'  \
+    -H 'Content-Type: application/json;charset=UTF-8' \
+    -H $YBA_AUTH_HEADER \
+    | jq '.[0]'
+  )
+  export YB_VERSION=$YBA_VERSION
+  export INSTANCE_TYPE="xsmall"
+  export UNIVERSE_UUID="$(uuidgen)"
+  export CLUSTER_UUID="$(uuidgen)"
+  export PROVIDER_UUID="$(echo "$PROVIDER" | jq  -r '.uuid')"
+  export PROVIDER_TYPE="$(echo "$PROVIDER" | jq -r '.code')"
+  export REGION_UUID="$(echo "$PROVIDER" | jq -r '.regions[0].uuid')"
+  export REGION_CODE="$(echo "$PROVIDER" | jq -r '.regions[0].code')"
+  export REGION_NAME="$(echo "$PROVIDER" | jq -r '.regions[0].name')"
+  export AZ1_UUID="$(echo "$PROVIDER" | jq -r '.regions[0].zones[0].uuid')"
+  export AZ1_CODE="$(echo "$PROVIDER" | jq -r '.regions[0].zones[0].code')"
+  export AZ1_NAME="$(echo "$PROVIDER" | jq -r '.regions[0].zones[0].name')"
+  export AZ1_SC="$(echo "$PROVIDER" | jq -r '.regions[0].zones[0].details.cloudInfo.kubernetes.kubernetesStorageClass')"
+  export AZ2_UUID="$(echo "$PROVIDER" | jq -r '.regions[0].zones[1].uuid')"
+  export AZ2_CODE="$(echo "$PROVIDER" | jq -r '.regions[0].zones[1].code')"
+  export AZ2_NAME="$(echo "$PROVIDER" | jq -r '.regions[0].zones[1].name')"
+  export AZ2_SC="$(echo "$PROVIDER" | jq -r '.regions[0].zones[1].details.cloudInfo.kubernetes.kubernetesStorageClass')"
+  export AZ3_UUID="$(echo "$PROVIDER" | jq -r '.regions[0].zones[2].uuid')"
+  export AZ3_CODE="$(echo "$PROVIDER" | jq -r '.regions[0].zones[2].code')"
+  export AZ3_NAME="$(echo "$PROVIDER" | jq -r '.regions[0].zones[2].name')"
+  export AZ3_SC="$(echo "$PROVIDER" | jq -r '.regions[0].zones[2].details.cloudInfo.kubernetes.kubernetesStorageClass')"
+  export NOW="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+
+  UNIVERSE_CREATE_REQUEST=$(cat $PROJECT_CONFIG_DIR/universe.template.json | envsubst)
+
+  UNIVERSE_CREATE_RESPONSE=$(curl $YBA_CUSTOMER_API/universes \
+    -ksSL \
+    -H 'Accept: application/json'  \
+    -H 'Content-Type: application/json;charset=UTF-8' \
+    -H $YBA_AUTH_HEADER \
+    -X POST \
+    --data-raw "$UNIVERSE_CREATE_REQUEST"
+  )
+  TASK_UUID=$(echo "$UNIVERSE_CREATE_RESPONSE" | jq -r '.taskUUID')
+  yba-wait-for-task $TASK_UUID
+  echo "$DB_NAME: Universe Created"
+}
+
+function yba-delete-universe(){
+  export DB_NAME=$1;shift
+  UNIVERSE_UUID=$(curl $YBA_CUSTOMER_API/universes?name=$DB_NAME \
+    -ksSL \
+    -H 'Accept: application/json'  \
+    -H 'Content-Type: application/json;charset=UTF-8' \
+    -H $YBA_AUTH_HEADER \
+    | jq  -r ".[0].universeUUID"
+  )
+  echo $UNIVERSE_UUID
+
+  UNIVERSE_DELETE_RESPONSE=$(curl $YBA_CUSTOMER_API/universes/$UNIVERSE_UUID \
+    -ksSL \
+    -H 'Accept: application/json'  \
+    -H 'Content-Type: application/json;charset=UTF-8' \
+    -H $YBA_AUTH_HEADER \
+    -X DELETE
+  )
+  TASK_UUID=$(echo "$UNIVERSE_DELETE_RESPONSE" | jq -r '.taskUUID')
+  yba-wait-for-task $TASK_UUID
+  echo "$DB_NAME: Universe Deleted"
+}
+function yba-wait-for-task(){
+  TASK_UUID=$1;shift
+  while true;
+  do
+    TASK_RESPONSE=$(curl $YBA_CUSTOMER_API/tasks/$TASK_UUID \
+      -ksSL \
+      -H 'Accept: application/json'  \
+      -H 'Content-Type: application/json;charset=UTF-8' \
+      -H $YBA_AUTH_HEADER \
+      -X GET
+    )
+    TASK_STATUS=$(echo "$TASK_RESPONSE" | jq -r '.status')
+    TASK_PERCENT=$(echo "$TASK_RESPONSE" | jq -r '.percent|round')
+    TASK_TITLE=$(echo "$TASK_RESPONSE" | jq -r '.title')
+    echo "TASK: [$TASK_UUID][$TASK_STATUS][$TASK_PERCENT%] $TASK_TITLE"
+
+    if [[ $TASK_STATUS != "Running" ]] ; then break ; fi
+    sleep 1
+  done
+}
+function add-config(){
+  key=$1;shift
+  value="$@"; shift
+  [[ -f $PROJECT_ENV_FILE ]]  || touch $PROJECT_ENV_FILE
+  config=$(cat $PROJECT_ENV_FILE)
+  config="$(echo "$config" | grep -v "export $key=" | sort)"
+  cat <<EOF | sort > $PROJECT_ENV_FILE
+$config
+export $key="$value"
+EOF
+}
+
+op=$1; shift
+$op "$@"
