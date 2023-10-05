@@ -1,0 +1,347 @@
+{
+  "platformVersion": "$YB_VERSION",
+  "sleepAfterMasterRestartMillis": 180000,
+  "sleepAfterTServerRestartMillis": 180000,
+  "nodeExporterUser": "prometheus",
+  "universeUUID": "$UNIVERSE_UUID",
+  "enableYbc": true,
+  "installYbc": false,
+  "ybcInstalled": false,
+  "expectedUniverseVersion": -1,
+  "encryptionAtRestConfig": {
+    "key_op": "UNDEFINED"
+  },
+  "nodeDetailsSet": [
+    {
+      "nodeIdx": 3,
+      "cloudInfo": {
+        "instance_type": "$INSTANCE_TYPE",
+        "az": "$AZ3_CODE",
+        "region": "$REGION_CODE",
+        "cloud": "kubernetes",
+        "assignPublicIP": true,
+        "useTimeSync": true,
+        "lun_indexes": []
+      },
+      "azUuid": "$AZ3_UUID",
+      "placementUuid": "$CLUSTER_UUID",
+      "disksAreMountedByUUID": true,
+      "ybPrebuiltAmi": false,
+      "state": "ToBeAdded",
+      "isMaster": false,
+      "masterHttpPort": 7000,
+      "masterRpcPort": 7100,
+      "isTserver": true,
+      "tserverHttpPort": 9000,
+      "tserverRpcPort": 9100,
+      "ybControllerHttpPort": 14000,
+      "ybControllerRpcPort": 18018,
+      "isRedisServer": true,
+      "redisServerHttpPort": 11000,
+      "redisServerRpcPort": 6379,
+      "isYqlServer": true,
+      "yqlServerHttpPort": 12000,
+      "yqlServerRpcPort": 9042,
+      "isYsqlServer": true,
+      "ysqlServerHttpPort": 13000,
+      "ysqlServerRpcPort": 5433,
+      "nodeExporterPort": 9300,
+      "cronsActive": true
+    },
+    {
+      "nodeIdx": 1,
+      "cloudInfo": {
+        "instance_type": "xsmall",
+        "az": "$AZ1_CODE",
+        "region": "$REGION_CODE",
+        "cloud": "kubernetes",
+        "assignPublicIP": true,
+        "useTimeSync": true,
+        "lun_indexes": []
+      },
+      "azUuid": "$AZ1_UUID",
+      "placementUuid": "$CLUSTER_UUID",
+      "disksAreMountedByUUID": true,
+      "ybPrebuiltAmi": false,
+      "state": "ToBeAdded",
+      "isMaster": false,
+      "masterHttpPort": 7000,
+      "masterRpcPort": 7100,
+      "isTserver": true,
+      "tserverHttpPort": 9000,
+      "tserverRpcPort": 9100,
+      "ybControllerHttpPort": 14000,
+      "ybControllerRpcPort": 18018,
+      "isRedisServer": true,
+      "redisServerHttpPort": 11000,
+      "redisServerRpcPort": 6379,
+      "isYqlServer": true,
+      "yqlServerHttpPort": 12000,
+      "yqlServerRpcPort": 9042,
+      "isYsqlServer": true,
+      "ysqlServerHttpPort": 13000,
+      "ysqlServerRpcPort": 5433,
+      "nodeExporterPort": 9300,
+      "cronsActive": true
+    },
+    {
+      "nodeIdx": 2,
+      "cloudInfo": {
+        "instance_type": "xsmall",
+        "az": "$AZ2_CODE",
+        "region": "$REGION_CODE",
+        "cloud": "kubernetes",
+        "assignPublicIP": true,
+        "useTimeSync": true,
+        "lun_indexes": []
+      },
+      "azUuid": "$AZ2_UUID",
+      "placementUuid": "$CLUSTER_UUID",
+      "disksAreMountedByUUID": true,
+      "ybPrebuiltAmi": false,
+      "state": "ToBeAdded",
+      "isMaster": false,
+      "masterHttpPort": 7000,
+      "masterRpcPort": 7100,
+      "isTserver": true,
+      "tserverHttpPort": 9000,
+      "tserverRpcPort": 9100,
+      "ybControllerHttpPort": 14000,
+      "ybControllerRpcPort": 18018,
+      "isRedisServer": true,
+      "redisServerHttpPort": 11000,
+      "redisServerRpcPort": 6379,
+      "isYqlServer": true,
+      "yqlServerHttpPort": 12000,
+      "yqlServerRpcPort": 9042,
+      "isYsqlServer": true,
+      "ysqlServerHttpPort": 13000,
+      "ysqlServerRpcPort": 5433,
+      "nodeExporterPort": 9300,
+      "cronsActive": true
+    }
+  ],
+  "communicationPorts": {
+    "masterHttpPort": 7000,
+    "masterRpcPort": 7100,
+    "tserverHttpPort": 9000,
+    "tserverRpcPort": 9100,
+    "ybControllerHttpPort": 14000,
+    "ybControllerrRpcPort": 18018,
+    "redisServerHttpPort": 11000,
+    "redisServerRpcPort": 6379,
+    "yqlServerHttpPort": 12000,
+    "yqlServerRpcPort": 9042,
+    "ysqlServerHttpPort": 13000,
+    "ysqlServerRpcPort": 5433,
+    "nodeExporterPort": 9300
+  },
+  "extraDependencies": {
+    "installNodeExporter": true
+  },
+  "creatingUser": {
+    "uuid": "$USER_UUID",
+    "customerUUID": "$CUSTOMER_UUID",
+    "email": "$YBA_USERNAME",
+    "creationDate": "$NOW",
+    "authTokenIssueDate": "$NOW",
+    "role": "SuperAdmin",
+    "userType": "local",
+    "ldapSpecifiedRole": false,
+    "primary": true
+  },
+  "platformUrl": "$YBA_HOSTNAME",
+  "clusters": [
+    {
+      "uuid": "$CLUSTER_UUID",
+      "clusterType": "PRIMARY",
+      "userIntent": {
+        "universeName": "$DB_NAME",
+        "provider": "$PROVIDER_UUID",
+        "providerType": "kubernetes",
+        "replicationFactor": 3,
+        "regionList": [
+          "$REGION_UUID"
+        ],
+        "instanceType": "xsmall",
+        "numNodes": 3,
+        "ybSoftwareVersion": "$YB_VERSION",
+        "accessKeyCode": "yugabyte-default",
+        "deviceInfo": {
+          "volumeSize": 10,
+          "numVolumes": 1,
+          "storageClass": "$AZ1_SC"
+        },
+        "assignPublicIP": true,
+        "assignStaticPublicIP": false,
+        "useSpotInstance": false,
+        "spotPrice": 0,
+        "useTimeSync": true,
+        "enableYCQL": true,
+        "enableYSQLAuth": false,
+        "enableYCQLAuth": false,
+        "enableYSQL": true,
+        "enableYEDIS": false,
+        "enableNodeToNodeEncrypt": false,
+        "enableClientToNodeEncrypt": false,
+        "enableVolumeEncryption": false,
+        "enableIPV6": false,
+        "enableLB": false,
+        "useHostname": false,
+        "useSystemd": true,
+        "masterGFlags": {},
+        "tserverGFlags": {},
+        "ybcFlags": {},
+        "instanceTags": {},
+        "dedicatedNodes": false,
+        "specificGFlags": {
+          "inheritFromPrimary": false,
+          "perProcessFlags": {
+            "value": {
+              "MASTER": {},
+              "TSERVER": {}
+            }
+          },
+          "perAZ": {}
+        }
+      },
+      "placementInfo": {
+        "cloudList": [
+          {
+            "uuid": "$PROVIDER_UUID",
+            "code": "kubernetes",
+            "regionList": [
+              {
+                "uuid": "$REGION_UUID",
+                "code": "$REGION_CODE",
+                "name": "$REGION_NAME",
+                "azList": [
+                  {
+                    "uuid": "$AZ1_UUID",
+                    "name": "$AZ1_NAME",
+                    "replicationFactor": 1,
+                    "numNodesInAZ": 1,
+                    "isAffinitized": true
+                  },
+                  {
+                    "uuid": "$AZ2_UUID",
+                    "name": "$AZ2_NAME",
+                    "replicationFactor": 1,
+                    "numNodesInAZ": 1,
+                    "isAffinitized": true
+                  },
+                  {
+                    "uuid": "$AZ3_UUID",
+                    "name": "$AZ3_NAME",
+                    "replicationFactor": 1,
+                    "numNodesInAZ": 1,
+                    "isAffinitized": true
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "index": 0,
+      "regions": [
+        {
+          "uuid": "$REGION_UUID",
+          "code": "$REGION_CODE",
+          "name": "$REGION_NAME",
+          "longitude": 103.8198,
+          "latitude": 1.3521,
+          "zones": [
+            {
+              "uuid": "$AZ1_UUID",
+              "code": "$AZ1_CODE",
+              "name": "$AZ1_NAME",
+              "active": true,
+              "details": {
+                "cloudInfo": {
+                  "kubernetes": {
+                    "kubeConfig": "",
+                    "kubernetesStorageClass": "$AZ1_SC",
+                    "legacyK8sProvider": true
+                  }
+                }
+              },
+              "kubeconfigPath": ""
+            },
+            {
+              "uuid": "$AZ3_UUID",
+              "code": "$AZ3_CODE",
+              "name": "$AZ3_NAME",
+              "active": true,
+              "details": {
+                "cloudInfo": {
+                  "kubernetes": {
+                    "kubeConfig": "",
+                    "kubernetesStorageClass": "$$AZ3_SC",
+                    "legacyK8sProvider": true
+                  }
+                }
+              },
+              "kubeconfigPath": ""
+            },
+            {
+              "uuid": "$AZ2_UUID",
+              "code": "$AZ2_CODE",
+              "name": "$AZ2_NAME",
+              "active": true,
+              "details": {
+                "cloudInfo": {
+                  "kubernetes": {
+                    "kubeConfig": "",
+                    "kubernetesStorageClass": "$AZ2_SC",
+                    "legacyK8sProvider": true
+                  }
+                }
+              },
+              "kubeconfigPath": ""
+            }
+          ],
+          "active": true,
+          "details": {
+            "cloudInfo": {
+              "kubernetes": {
+                "legacyK8sProvider": true
+              }
+            }
+          }
+        }
+      ]
+    }
+  ],
+  "currentClusterType": "PRIMARY",
+  "nodePrefix": "yb-demo-$DB_NAME",
+  "rootAndClientRootCASame": true,
+  "userAZSelected": false,
+  "resetAZConfig": false,
+  "updateInProgress": false,
+  "updateSucceeded": true,
+  "universePaused": false,
+  "nextClusterIndex": 1,
+  "allowInsecure": true,
+  "setTxnTableWaitCountFlag": false,
+  "itestS3PackagePath": "",
+  "remotePackagePath": "",
+  "nodesResizeAvailable": false,
+  "useNewHelmNamingStyle": false,
+  "mastersInDefaultRegion": false,
+  "overridePrebuiltAmiDBVersion": false,
+  "importedState": "NONE",
+  "capability": "EDITS_ALLOWED",
+  "updateOptions": [
+    "UPDATE"
+  ],
+  "clusterOperation": "CREATE",
+  "allowGeoPartitioning": false,
+  "regionsChanged": false,
+  "xclusterInfo": {
+    "targetXClusterConfigs": [],
+    "sourceXClusterConfigs": []
+  },
+  "targetXClusterConfigs": [],
+  "sourceXClusterConfigs": []
+}
