@@ -26,6 +26,7 @@ This is a demo project to get YBA running on an eks cluster.
     ```bash
     git clone <repo> yb-eks-demo
     cd yb-eks-demo
+    direnv allow
     ```
 2. Create `demo.env` file from `demo.template.env` file
 
