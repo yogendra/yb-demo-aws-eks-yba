@@ -7,12 +7,12 @@ metadata:
 spec:
   tls:
   - hosts:
-      - yba.$PROJECT_DOMAIN
-      - yba-prom.$PROJECT_DOMAIN
+      - $YBA_HOSTNAME
+      - $YBA_PROM_HOSTNAME
     secretName: yba-tls
   ingressClassName: nginx
   rules:
-  - host: yba.$PROJECT_DOMAIN
+  - host: $YBA_HOSTNAME
     http:
       paths:
       - backend:
@@ -22,7 +22,7 @@ spec:
               number: 80
         path: /
         pathType: Prefix
-  - host: yba-prom.$PROJECT_DOMAIN
+  - host: $YBA_PROM_HOSTNAME
     http:
       paths:
       - backend:
