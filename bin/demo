@@ -1,38 +1,38 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
-SCRIPT_DIR=$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )
-SCRIPT=${BASH_SOURCE[0]}
-PROJECT_DIR=${PROJECT_DIR:-$(cd $SCRIPT_DIR/..; pwd)}
-PROJECT_CONFIG_DIR=${PROJECT_CONFIG_DIR:-$(cd $PROJECT_DIR/config; pwd)}
+export SCRIPT_DIR=$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )
+export SCRIPT=${BASH_SOURCE[0]}
+export PROJECT_DIR=${PROJECT_DIR:-$(cd $SCRIPT_DIR/..; pwd)}
+export PROJECT_CONFIG_DIR=${PROJECT_CONFIG_DIR:-$(cd $PROJECT_DIR/config; pwd)}
 
-PROJECT_ENV_FILE=${PROJECT_ENV_FILE:-$PROJECT_DIR/demo.env}
+export PROJECT_ENV_FILE=${PROJECT_ENV_FILE:-$PROJECT_DIR/demo.env}
 [[ -f $PROJECT_ENV_FILE ]] && source $PROJECT_ENV_FILE
 export PROJECT_DOMAIN=${PROJECT_DOMAIN?"must be set in config file"}
 export AWS_HOSTEDZONE_ID=${AWS_HOSTEDZONE_ID?"must be set in config file"}
 
-K8S_CLUSTER_CONFIG=${K8S_CLUSTER_CONFIG:-$PROJECT_CONFIG_DIR/shr-eks-sg.yaml}
+export K8S_CLUSTER_CONFIG=${K8S_CLUSTER_CONFIG:-$PROJECT_CONFIG_DIR/shr-eks-sg.yaml}
 
-INGRESS_NGINX_HELM_VALUES=${INGRESS_NGINX_HELM_VALUES:-$PROJECT_CONFIG_DIR/ingress-nginx-values.yaml}
+export INGRESS_NGINX_HELM_VALUES=${INGRESS_NGINX_HELM_VALUES:-$PROJECT_CONFIG_DIR/ingress-nginx-values.yaml}
 
-CERT_MANAGER_CONFIG=${CERT_MANAGER_CONFIG:-$PROJECT_CONFIG_DIR/certs.yaml}
+export CERT_MANAGER_CONFIG=${CERT_MANAGER_CONFIG:-$PROJECT_CONFIG_DIR/certs.yaml}
 
-YBA_HELM_VALUES=${YBA_HELM_VALUES:-$PROJECT_CONFIG_DIR/yugaware-values.yaml}
-YBA_LICENSE=${YB_LICENSE:-$PROJECT_CONFIG_DIR/yugabyte-*-secret.yml}
-YBA_LICENSE_VALUE=$(jq -Rs < $YBA_LICENSE)
-YBA_K8S_STORAGECLASS=${YBA_K8S_STORAGECLASS:-gp3}
-YBA_NS=${YBA_NS:-yb-platform}
-YBA_HELM_RELEASE=${YBA_HELM_RELEASE:-yba}
+export YBA_HELM_VALUES=${YBA_HELM_VALUES:-$PROJECT_CONFIG_DIR/yugaware-values.yaml}
+export YBA_LICENSE=${YB_LICENSE:-$PROJECT_CONFIG_DIR/yugabyte-*-secret.yml}
+export YBA_LICENSE_VALUE=$(jq -Rs < $YBA_LICENSE)
+export YBA_K8S_STORAGECLASS=${YBA_K8S_STORAGECLASS:-gp3}
+export YBA_NS=${YBA_NS:-yb-platform}
+export YBA_HELM_RELEASE=${YBA_HELM_RELEASE:-yba}
 
-YBA_HOSTNAME=${YBA_HOSTNAME:-yba.$PROJECT_DOMAIN}
-YBA_PROM_HOSTNAME=${YBA_PROM_HOSTNAME:-yba-prom.$PROJECT_DOMAIN}
-YBA_PORTAL=https://$YBA_HOSTNAME
-YBA_API=$YBA_PORTAL/api/v1
-YBA_USERNAME=${YBA_USERNAME:-superadmin@yugabyte.com}
-YBA_PASSWORD=${YBA_PASSWORD:-Password#123}
-YBA_BACKUP_BUCKET=${YBA_BACKUP_BUCKET:-yugabyte-apj-demo-backup}
-YBA_VERSION=${YBA_VERSION:-2.18.2.1-b1}
-YBA_HELM_VERSION=${YBA_HELM_VERSION:-2.18.2+1}
-YBA_K8S_PROVIDER_NAME=${YBA_K8S_PROVIDER_NAME:-shr-eks-sg}
+export YBA_HOSTNAME=${YBA_HOSTNAME:-yba.$PROJECT_DOMAIN}
+export YBA_PROM_HOSTNAME=${YBA_PROM_HOSTNAME:-yba-prom.$PROJECT_DOMAIN}
+export YBA_PORTAL=https://$YBA_HOSTNAME
+export YBA_API=$YBA_PORTAL/api/v1
+export YBA_USERNAME=${YBA_USERNAME:-superadmin@yugabyte.com}
+export YBA_PASSWORD=${YBA_PASSWORD:-Password#123}
+export YBA_BACKUP_BUCKET=${YBA_BACKUP_BUCKET:-yugabyte-apj-demo-backup}
+export YBA_VERSION=${YBA_VERSION:-2.18.2.1-b1}
+export YBA_HELM_VERSION=${YBA_HELM_VERSION:-2.18.2+1}
+export YBA_K8S_PROVIDER_NAME=${YBA_K8S_PROVIDER_NAME:-shr-eks-sg}
 
 function yba-login(){
 
@@ -170,8 +170,9 @@ EOF
   until nslookup test.$PROJECT_DOMAIN &> /dev/null
   do
     echo -n "."
-    sleep 1
+    sleep 10
   done
+  log "Done"
 }
 function  k8s-delete-ingress(){
   INGRESS_CONTROLLER_ADDRESS=$(kubectl get service  -n ingress-nginx  ingress-nginx-controller -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')
@@ -258,8 +259,9 @@ function yba-install(){
   until  curl -m1 -fksSL $YBA_API/app_version &>> /dev/null
   do
     echo -n "."
-    sleep 1
+    sleep 5
   done
+  log "Done"
 
 }
 function yba-uninstall(){
@@ -547,9 +549,12 @@ function yba-delete-universe(){
     -H 'Accept: application/json'  \
     -H 'Content-Type: application/json;charset=UTF-8' \
     -H $YBA_AUTH_HEADER \
-    | jq  -r ".[0].universeUUID"
+    | jq  -r ".[].universeUUID"
   )
-  echo $UNIVERSE_UUID
+  if [[ -z $UNIVERSE_UUID ]]; then
+    log "$DB_NAME: Not found"
+    return
+  fi
 
   UNIVERSE_DELETE_RESPONSE=$(curl $YBA_CUSTOMER_API/universes/$UNIVERSE_UUID \
     -ksSL \
@@ -579,7 +584,7 @@ function yba-wait-for-task(){
     echo "TASK: [$TASK_UUID][$TASK_STATUS][$TASK_PERCENT%] $TASK_TITLE"
 
     if [[ $TASK_STATUS != "Running" ]] ; then break ; fi
-    sleep 1
+    sleep 5
   done
 }
 function set-config(){
