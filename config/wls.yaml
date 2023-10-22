@@ -1,0 +1,117 @@
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  labels:
+    app: wls
+    ybdb: $DB_NAME
+  name: $DB_NAME-wls-config
+data:
+  SPRING_APPLICATION_JSON: |
+    {
+      "spring": {
+        "application": {
+          "name": "Workload Simulator $DB_NAME"
+        },
+        "datasource": {
+          "hikari": {
+            "data-source-properties": {
+              "additionalEndpoints": "$ADDITIONAL_ENDPOINTS",
+              "databaseName": "yugabyte",
+              "serverName": "$SERVER_NAME",
+              "portNumber": "5433",
+              "topologyKeys": "kubernetes.ap-southeast-1.*"
+            },
+            "password": "",
+            "username": "yugabyte"
+          }
+        }
+      }
+    }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app: wls
+    ybdb: $DB_NAME
+  name: $DB_NAME-wls
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: wls
+      ybdb: $DB_NAME
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 1
+      maxSurge: 1
+  template:
+    metadata:
+      labels:
+        app: wls
+        ybdb: $DB_NAME
+    spec:
+      containers:
+        - image: quay.io/yogendra/yb-workload-simu-app:latest
+          name: wls
+          resources:
+            requests:
+              cpu: 1000m
+              memory: 4Gi
+            limits:
+              cpu: 2000m
+              memory: 8Gi
+          envFrom:
+            - configMapRef:
+                name: $DB_NAME-wls-config
+                optional: true
+          ports:
+            - containerPort: 8080
+              name: http
+---
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    app: wls
+    ybdb: $DB_NAME
+  name: $DB_NAME-wls
+spec:
+  selector:
+    app: wls
+    ybdb: $DB_NAME
+  type: NodePort
+  ports:
+    - port: 80
+      targetPort: http
+      name: http
+      nodePort: 32000
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  labels:
+    app: wls
+    ybdb: $DB_NAME
+  annotations:
+    cert-manager.io/cluster-issuer: root-ca
+  name: $DB_NAME-wls
+spec:
+  tls:
+  - hosts:
+      - $WLS_HOSTNAME
+    secretName: $DB_NAME-wls-tls
+  ingressClassName: nginx
+  rules:
+  - host: $WLS_HOSTNAME
+    http:
+      paths:
+      - backend:
+          service:
+            name: $DB_NAME-wls
+            port:
+              name: http
+        path: /
+        pathType: Prefix
