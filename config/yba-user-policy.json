@@ -1,0 +1,62 @@
+{
+  "Statement": [
+      {
+          "Action": [
+              "route53:ChangeResourceRecordSets"
+          ],
+          "Effect": "Allow",
+          "Resource": "*",
+          "Sid": "HostedZoneEditor"
+      },
+      {
+          "Action": [
+              "route53:Get*",
+              "route53:List*"
+          ],
+          "Effect": "Allow",
+          "Resource": "*",
+          "Sid": "HostedZoneReader"
+      },
+      {
+          "Action": [
+              "iam:GetRole",
+              "iam:PassRole"
+          ],
+          "Effect": "Allow",
+          "Resource": "*",
+          "Sid": "IamReader"
+      },
+      {
+          "Action": [
+              "kms:CreateKey",
+              "kms:ListAliases",
+              "kms:ListKeys",
+              "kms:CreateAlias",
+              "kms:DeleteAlias",
+              "kms:UpdateAlias",
+              "kms:TagResource"
+          ],
+          "Effect": "Allow",
+          "Resource": "*",
+          "Sid": "KMSManagement"
+      },
+      {
+          "Action": [
+              "kms:Decrypt",
+              "kms:GenerateDataKey"
+          ],
+          "Effect": "Allow",
+          "Resource": "*",
+          "Sid": "KMSDecryptor"
+      },
+      {
+          "Action": [
+              "ec2:*"
+          ],
+          "Effect": "Allow",
+          "Resource": "*",
+          "Sid": "EC2Manager"
+      }
+  ],
+  "Version": "2012-10-17"
+}
