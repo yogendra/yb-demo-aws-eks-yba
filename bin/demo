@@ -2,15 +2,22 @@
 set -Eeuo pipefail
 export SCRIPT_DIR=$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )
 export SCRIPT=${BASH_SOURCE[0]}
+
 export PROJECT_DIR=${PROJECT_DIR:-$(cd $SCRIPT_DIR/..; pwd)}
 export PROJECT_CONFIG_DIR=${PROJECT_CONFIG_DIR:-$(cd $PROJECT_DIR/config; pwd)}
+export PROJECT_ENV_FILE=${PROJECT_ENV_FILE:-$PROJECT_CONFIG_DIR/demo.env}
 
-export PROJECT_ENV_FILE=${PROJECT_ENV_FILE:-$PROJECT_DIR/demo.env}
-[[ -f $PROJECT_ENV_FILE ]] && source $PROJECT_ENV_FILE
-export PROJECT_DOMAIN=${PROJECT_DOMAIN?"must be set in config file"}
+export PROJECT_NAME=${PROJECT_NAME?"Project Name not set"}
 export AWS_HOSTEDZONE_ID=${AWS_HOSTEDZONE_ID?"must be set in config file"}
+export AWS_HOSTEDZONE_ROOT_DOMAIN=${AWS_HOSTEDZONE_ROOT_DOMAIN:-$(aws route53  get-hosted-zone --id $AWS_HOSTEDZONE_ID --query "HostedZone.Name" --output text | sed 's/\.$//')}
+export PROJECT_USER=${PROJECT_USER:-$USER}
+export AWS_COMMON_TAGS="Key=yb_owner,Value='$PROJECT_USER' Key=yb_dept,Value=sales Key=yb_project,Value='$PROJECT_NAME' Key=yb_env,Value=demo Key=yb_task,Value=demo"
 
-export K8S_CLUSTER_CONFIG=${K8S_CLUSTER_CONFIG:-$PROJECT_CONFIG_DIR/shr-eks-sg.yaml}
+[[ -f $PROJECT_ENV_FILE ]] && source $PROJECT_ENV_FILE
+
+export PROJECT_DOMAIN=${PROJECT_DOMAIN:-$PROJECT_NAME.$AWS_HOSTEDZONE_ROOT_DOMAIN}
+
+export K8S_CLUSTER_CONFIG=${K8S_CLUSTER_CONFIG:-$PROJECT_CONFIG_DIR/eks.yaml}
 
 export INGRESS_NGINX_HELM_VALUES=${INGRESS_NGINX_HELM_VALUES:-$PROJECT_CONFIG_DIR/ingress-nginx-values.yaml}
 
@@ -32,7 +39,7 @@ export YBA_PASSWORD=${YBA_PASSWORD:-Password#123}
 export YBA_BACKUP_BUCKET=${YBA_BACKUP_BUCKET:-yugabyte-apj-demo-backup}
 export YBA_VERSION=${YBA_VERSION:-2.18.2.1-b1}
 export YBA_HELM_VERSION=${YBA_HELM_VERSION:-2.18.2+1}
-export YBA_K8S_PROVIDER_NAME=${YBA_K8S_PROVIDER_NAME:-shr-eks-sg}
+export YBA_K8S_PROVIDER_NAME=${YBA_K8S_PROVIDER_NAME:-$PROJECT_NAME}
 
 function yba-login(){
 
@@ -40,7 +47,7 @@ function yba-login(){
       -ksSL \
       -H content-type:application/json \
       -X POST \
-      -d "{\"emai\":\"$YBA_USERNAME\",\"passwor\":\"$YBA_PASSWOR\" }"  \
+      -d "{\"emai\":\"$YBA_USERNAME\",\"passwor\":\"$YBA_PASSWOR\" }" \
       | jq -r '.authToken'
   )
   SESSION_INFO_RESPONSE_JSON=$(curl $YBA_API/session_info
@@ -57,16 +64,68 @@ function yba-login(){
 
 function start(){
   banner "Start Demo"
+  iam-setup
   k8s-setup
   yba-setup
   yba-create-db
 }
 function stop(){
   banner "Stop Demo"
+  set +e
   yba-delete-db
   yba-destroy
   k8s-destroy
+  iam-destroy
 }
+
+function iam-setup(){
+  log "Create policy[$PROJECT_NAME-YBA-Policy]"
+  aws iam create-policy --no-paginate --policy-name $PROJECT_NAME-YBA-Policy --tags $AWS_COMMON_TAGS Key=yb_name,Value=$PROJECT_NAME-YBA-Policy --policy-document file://$PROJECT_CONFIG_DIR/yba-user-policy.json --query="Policy.Arn" --output text
+
+  YBA_IAM_POLICY_ARN=$(aws iam list-policies --scope Local --query "Policies[?PolicyName==\`$PROJECT_NAME-YBA-Policy\`].Arn|[0]" --output text)
+  log Cretest IAM Policy YBA_IAM_POLICY_ARN=$YBA_IAM_POLICY_ARN
+  aws iam create-user --no-paginate --user-name $PROJECT_NAME-SA --tags $AWS_COMMON_TAGS Key=yb_name,Value=$PROJECT_NAME-SA --query "User.Arn" --output text
+  aws iam attach-user-policy --no-paginate --user-name $PROJECT_NAME-SA --policy-arn $YBA_IAM_POLICY_ARN
+  IAM_RESPONSE=$(aws iam create-access-key --user-name $PROJECT_NAME-SA)
+  export YBA_AWS_ACCESS_KEY_ID=$(echo "$IAM_RESPONSE" | jq -r '.AccessKey.AccessKeyId')
+  export YBA_AWS_SECRET_ACCESS_KEY=$(echo "$IAM_RESPONSE" | jq -r '.AccessKey.SecretAccessKey')
+  set-config YBA_AWS_ACCESS_KEY_ID $YBA_AWS_ACCESS_KEY_ID
+  set-config YBA_AWS_SECRET_ACCESS_KEY $YBA_AWS_SECRET_ACCESS_KEY
+
+}
+function iam-destroy(){
+  set +e
+
+  if [[ -n "${YBA_AWS_ACCESS_KEY_ID:-}" ]]; then
+    log "Delete access keys[$YBA_AWS_ACCESS_KEY_ID] for sa user[$PROJECT_NAME-SA]"
+    aws iam delete-access-key --user-name $PROJECT_NAME-SA --access-key-id $YBA_AWS_ACCESS_KEY_ID
+    unset YBA_AWS_ACCESS_KEY_ID
+    unset YBA_AWS_SECRET_ACCESS_KEY
+    unset-config YBA_AWS_ACCESS_KEY_ID
+    unset-config YBA_AWS_SECRET_ACCESS_KEY
+  fi
+
+  aws iam list-attached-user-policies --no-paginate --user-name $PROJECT_NAME-SA --query "AttachedPolicies[].PolicyArn" --output text | while read arn; do
+
+    if [[ $arn != None ]] ; then
+      log detach Policy[$arn] from project sa user[$PROJECT_NAME-SA]
+      aws iam detach-user-policy --user-name $PROJECT_NAME-SA --policy-arn $arn
+    fi
+  done
+
+  log "Delete sa user[$PROJECT_NAME-SA]"
+  aws iam delete-user --user-name $PROJECT_NAME-SA
+
+  YBA_IAM_POLICY_ARN=$(aws iam list-policies --scope Local --query "Policies[?PolicyName==\`$PROJECT_NAME-YBA-Policy\`].Arn|[0]" --output text)
+
+  if [[ "$YBA_IAM_POLICY_ARN" != "null" ]] ; then
+    log "Delete user policy[$YBA_IAM_POLICY_ARN]"
+    aws iam delete-policy --policy-arn $YBA_IAM_POLICY_ARN
+  fi
+
+}
+
+
 function k8s-setup(){
   banner "Setup K8s"
   k8s-create-cluster
@@ -79,15 +138,19 @@ function k8s-destroy(){
 }
 function k8s-create-cluster(){
   banner "Create K8s cluster"
-  eksctl create cluster -f $K8S_CLUSTER_CONFIG
-  kubectl config rename-context $(kubectl config current-context) shr-eks-sg
+  cat $K8S_CLUSTER_CONFIG| envsubst | eksctl create cluster -f-
+  k8s-configure-kubeconfig
+
 }
 function k8s-delete-cluster(){
   banner "Delete K8s Cluster"
-  eksctl delete cluster -f $K8S_CLUSTER_CONFIG
-
+  cat $K8S_CLUSTER_CONFIG| envsubst | eksctl delete cluster -f-
 }
 
+function k8s-configure-kubeconfig(){
+  kubectl config delete-context $PROJECT_NAME || true
+  kubectl config rename-context $(kubectl config current-context) $PROJECT_NAME
+}
 function k8s-create-common-services(){
   log "Create common K8s services"
   k8s-create-sc
@@ -99,6 +162,27 @@ function k8s-delete-common-services(){
   k8s-delete-ingress
   k8s-delete-cert-manager
   k8s-delete-sc
+  k8s-delete-pdb
+}
+function k8s-delete-pdb(){
+  kubectl delete poddisruptionbudget -n kube-system ebs-csi-controller
+  kubectl delete poddisruptionbudget -n kube-system coredns
+}
+function pause(){
+   aws eks update-nodegroup-config --no-paginate --cluster-name $PROJECT_NAME --nodegroup-name $PROJECT_NAME-wkr-a \
+    --scaling-config minSize=0,maxSize=3,desiredSize=0
+   aws eks update-nodegroup-config --no-paginate --cluster-name $PROJECT_NAME --nodegroup-name $PROJECT_NAME-wkr-b \
+    --scaling-config minSize=0,maxSize=3,desiredSize=0
+   aws eks update-nodegroup-config --no-paginate --cluster-name $PROJECT_NAME --nodegroup-name $PROJECT_NAME-wkr-c \
+    --scaling-config minSize=0,maxSize=3,desiredSize=0
+}
+function resume(){
+   aws eks update-nodegroup-config --no-paginate --cluster-name $PROJECT_NAME --nodegroup-name $PROJECT_NAME-wkr-a \
+    --scaling-config minSize=0,maxSize=3,desiredSize=1
+   aws eks update-nodegroup-config --no-paginate --cluster-name $PROJECT_NAME --nodegroup-name $PROJECT_NAME-wkr-b \
+    --scaling-config minSize=0,maxSize=3,desiredSize=1
+   aws eks update-nodegroup-config --no-paginate --cluster-name $PROJECT_NAME --nodegroup-name $PROJECT_NAME-wkr-c \
+    --scaling-config minSize=0,maxSize=3,desiredSize=1
 }
 
 function k8s-create-sc(){
@@ -175,6 +259,7 @@ EOF
   log "Done"
 }
 function  k8s-delete-ingress(){
+  set +e
   INGRESS_CONTROLLER_ADDRESS=$(kubectl get service  -n ingress-nginx  ingress-nginx-controller -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')
   DNS_CHANGE=$(cat<<EOF | jq -Mc
   {
@@ -265,6 +350,7 @@ function yba-install(){
 
 }
 function yba-uninstall(){
+  set +e
   log Remove ingress
   cat $PROJECT_CONFIG_DIR/yba-ingress.template.yaml | envsubst | kubectl delete -n $YBA_NS -f-
 
@@ -274,7 +360,7 @@ function yba-uninstall(){
   log Delete YBA License
   kubectl delete -n $YBA_NS -f $YBA_LICENSE
 
-  log Delet YBA Namespace
+  log Delete YBA Namespace
   kubectl delete ns $YBA_NS
 }
 
@@ -482,14 +568,12 @@ EOF
 function yba-create-db(){
   banner "Create DB"
   yba-create-universe db1 $YBA_K8S_PROVIDER_NAME
-  yba-create-universe db2 $YBA_K8S_PROVIDER_NAME
-  yba-create-universe db3 $YBA_K8S_PROVIDER_NAME
+  wls-deploy db1
 }
 function yba-delete-db(){
   banner "Delete DB"
+  wls-undeploy db1
   yba-delete-universe db1
-  yba-delete-universe db2
-  yba-delete-universe db3
 }
 function yba-create-universe(){
   export DB_NAME=$1;shift
@@ -538,7 +622,7 @@ function yba-create-universe(){
   )
   TASK_UUID=$(echo "$UNIVERSE_CREATE_RESPONSE" | jq -r '.taskUUID')
   yba-wait-for-task $TASK_UUID
-  echo "$DB_NAME: Universe Created"
+  log "$DB_NAME: Universe Created"
 }
 
 function yba-delete-universe(){
@@ -565,7 +649,30 @@ function yba-delete-universe(){
   )
   TASK_UUID=$(echo "$UNIVERSE_DELETE_RESPONSE" | jq -r '.taskUUID')
   yba-wait-for-task $TASK_UUID
-  echo "$DB_NAME: Universe Deleted"
+  log "$DB_NAME: Universe Deleted"
+}
+function wls-deploy(){
+  db=${1?"DB Name missing"}
+  tservers=$(get-universe-tservers $db)
+  export DB_NAME=$db
+  export WLS_HOSTNAME=$DB_NAME-wls.$PROJECT_DOMAIN
+  export SERVER_NAME=$(echo "$tservers" | head -1 | cut -f1 -d:)
+  export ADDITIONAL_ENDPOINTS=$(echo "$tservers" | tail -n +2 | tr '\n' ','|sed 's/,$//')
+  log "
+  DB_NAME              = [$DB_NAME]
+  WLS_HOSTNAME         = [$WLS_HOSTNAME]
+  SERVER_NAME          = [$SERVER_NAME]
+  ADDITIONAL_ENDPOINTS = [$ADDITIONAL_ENDPOINTS]"
+  cat $PROJECT_CONFIG_DIR/wls.yaml | envsubst | kubectl apply -n yb-platform -f-
+  kubectl wait --timeout=120s --for=jsonpath='{.status.loadBalancer.ingress}'  ingress/$DB_NAME-wls  -n yb-platform
+  wls_hostname=$(kubectl get -n yb-platform ing/$DB_NAME-wls -o jsonpath='{.spec.rules[0].host}')
+  log "WLS: https://$wls_hostname"
+}
+function wls-undeploy(){
+  db=${1?"DB Missing"}
+  export DB_NAME=$db
+  export WLS_HOSTNAME=$DB_NAME-wls.$PROJECT_DOMAIN
+  cat $PROJECT_CONFIG_DIR/wls.yaml | envsubst | kubectl delete -n yb-platform -f-
 }
 function yba-wait-for-task(){
   TASK_UUID=$1;shift
@@ -581,11 +688,32 @@ function yba-wait-for-task(){
     TASK_STATUS=$(echo "$TASK_RESPONSE" | jq -r '.status')
     TASK_PERCENT=$(echo "$TASK_RESPONSE" | jq -r '.percent|round')
     TASK_TITLE=$(echo "$TASK_RESPONSE" | jq -r '.title')
-    echo "TASK: [$TASK_UUID][$TASK_STATUS][$TASK_PERCENT%] $TASK_TITLE"
+    log "TASK: [$TASK_UUID][$TASK_STATUS][$TASK_PERCENT%] $TASK_TITLE"
 
     if [[ $TASK_STATUS != "Running" ]] ; then break ; fi
     sleep 5
   done
+}
+function get-universe-tservers(){
+  universe_name=${1?"Universe name missing"}
+  universe_uuid=$(
+    curl $YBA_CUSTOMER_API/universes?name=$universe_name\
+      -ksSL \
+      -H 'Accept: application/json'  \
+      -H 'Content-Type: application/json;charset=UTF-8' \
+      -H $YBA_AUTH_HEADER \
+      -X GET  \
+      | jq -r '.[0].universeUUID'
+  )
+  curl $YBA_CUSTOMER_API/universes/$universe_uuid/ysqlservers\
+      -ksSL \
+      -H 'Accept: application/json'  \
+      -H 'Content-Type: application/json;charset=UTF-8' \
+      -H $YBA_AUTH_HEADER \
+      -X GET |
+      jq -r |
+      tr ',' '\n'
+
 }
 function set-config(){
   key=$1;shift
