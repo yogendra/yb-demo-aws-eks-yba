@@ -1,0 +1,142 @@
+---
+apiVersion: eksctl.io/v1alpha5
+kind: ClusterConfig
+
+metadata:
+  name: $PROJECT_NAME
+  region: ap-southeast-1
+  version: "1.27"
+  tags:
+    yb_owner: yrampuria
+    yb_dept: sales
+    yb_env: demo
+    yb_task: demo
+    yb_project: $PROJECT_NAME
+
+
+vpc:
+  id: "vpc-02287e4fca4c8a307"
+  subnets:
+    private:
+      ap-southeast-1a:
+        id: "subnet-049ef6f8b94f9d6ee"
+
+      ap-southeast-1b:
+        id: "subnet-0b633cf4a1d42aad7"
+
+      ap-southeast-1c:
+        id: "subnet-0f80c2725cafab73b"
+
+addons:
+  - name: aws-ebs-csi-driver
+    version: latest
+    wellKnownPolicies:
+      ebsCSIController: true
+  - name: coredns
+    version: latest
+  - name: kube-proxy
+    version: latest
+  - name: vpc-cni
+    attachPolicyARNs:
+    - arn:aws:iam::aws:policy/AmazonEKS_CNI_Policy
+
+managedNodeGroups:
+  - name: $PROJECT_NAME-wkr-a
+    availabilityZones: ["ap-southeast-1a"]
+    instanceType: m6a.4xlarge
+    minSize: 0
+    maxSize: 3
+    desiredCapacity: 1
+    volumeSize: 100
+    privateNetworking: true
+    spot: true
+    ssh:
+      enableSSM: true
+      publicKeyName: shr-0
+    securityGroups:
+      attachIDs:
+      - sg-09fe348b872db4f7d
+    labels:
+      roles: worker
+    tags:
+      nodegroup-role: worker
+      yb_owner: yrampuria
+      yb_dept: sales
+      yb_task: demo
+      yb_env: demo
+      yb_project: $PROJECT_NAME
+    iam:
+      withAddonPolicies:
+        autoScaler: true
+        externalDNS: true
+        certManager: true
+        ebs: true
+        efs: true
+        awsLoadBalancerController: true
+        cloudWatch: true
+  - name: $PROJECT_NAME-wkr-b
+    availabilityZones: ["ap-southeast-1b"]
+    instanceType: m6a.4xlarge
+    minSize: 0
+    maxSize: 3
+    desiredCapacity: 1
+    volumeSize: 100
+    privateNetworking: true
+    spot: true
+    ssh:
+      enableSSM: true
+      publicKeyName: shr-0
+    securityGroups:
+      attachIDs:
+      - sg-09fe348b872db4f7d
+    labels:
+      roles: worker
+    tags:
+      nodegroup-role: worker
+      yb_owner: yrampuria
+      yb_dept: sales
+      yb_task: demo
+      yb_env: demo
+      yb_project: $PROJECT_NAME
+    iam:
+      withAddonPolicies:
+        autoScaler: true
+        externalDNS: true
+        certManager: true
+        ebs: true
+        efs: true
+        awsLoadBalancerController: true
+        cloudWatch: true
+  - name: $PROJECT_NAME-wkr-c
+    availabilityZones: ["ap-southeast-1c"]
+    instanceType: m6a.4xlarge
+    minSize: 0
+    maxSize: 3
+    desiredCapacity: 1
+    volumeSize: 100
+    privateNetworking: true
+    spot: true
+    ssh:
+      enableSSM: true
+      publicKeyName: shr-0
+    securityGroups:
+      attachIDs:
+      - sg-09fe348b872db4f7d
+    labels:
+      roles: worker
+    tags:
+      nodegroup-role: worker
+      yb_owner: yrampuria
+      yb_dept: sales
+      yb_task: demo
+      yb_env: demo
+      yb_project: $PROJECT_NAME
+    iam:
+      withAddonPolicies:
+        autoScaler: true
+        externalDNS: true
+        certManager: true
+        ebs: true
+        efs: true
+        awsLoadBalancerController: true
+        cloudWatch: true
