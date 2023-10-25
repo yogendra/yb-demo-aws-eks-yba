@@ -13,7 +13,8 @@ export AWS_HOSTEDZONE_ROOT_DOMAIN=${AWS_HOSTEDZONE_ROOT_DOMAIN:-$(aws route53  g
 export PROJECT_USER=${PROJECT_USER:-$USER}
 export AWS_COMMON_TAGS="Key=yb_owner,Value='$PROJECT_USER' Key=yb_dept,Value=sales Key=yb_project,Value='$PROJECT_NAME' Key=yb_env,Value=demo Key=yb_task,Value=demo"
 
-[[ -f $PROJECT_ENV_FILE ]] && source $PROJECT_ENV_FILE
+touch $PROJECT_ENV_FILE
+source $PROJECT_ENV_FILE
 
 export PROJECT_DOMAIN=${PROJECT_DOMAIN:-$PROJECT_NAME.$AWS_HOSTEDZONE_ROOT_DOMAIN}
 
@@ -40,9 +41,58 @@ export YBA_BACKUP_BUCKET=${YBA_BACKUP_BUCKET:-yugabyte-apj-demo-backup}
 export YBA_VERSION=${YBA_VERSION:-2.18.2.1-b1}
 export YBA_HELM_VERSION=${YBA_HELM_VERSION:-2.18.2+1}
 export YBA_K8S_PROVIDER_NAME=${YBA_K8S_PROVIDER_NAME:-$PROJECT_NAME}
+export AWS_REGION=${AWS_REGION:-$(aws configure get region)}
+export AWS_VPC_ID=${AWS_VPC_ID:-$(aws ec2 --region $AWS_REGION describe-vpcs --query 'Vpcs[?IsDefault==`true`].VpcId' --output text)}
+export AWS_AZ1=${AWS_AZ1:-$(aws ec2 --region $AWS_REGION describe-availability-zones --query 'AvailabilityZones[0].ZoneName' --output text)}
+export AWS_AZ1_SUBNET=${AWS_AZ1_SUBNET:-$(aws ec2 --region $AWS_REGION describe-subnets --query "Subnets[?AvailabilityZone==\`$AWS_AZ1\` && MapPublicIpOnLaunch==\`false\` && VpcId==\`$AWS_VPC_ID\`].SubnetId|[0]" --output text)}
+export AWS_AZ2=${AWS_AZ2:-$(aws ec2 --region $AWS_REGION describe-availability-zones --query 'AvailabilityZones[1].ZoneName' --output text)}
+export AWS_AZ2_SUBNET=${AWS_AZ2_SUBNET:-$(aws ec2 --region $AWS_REGION describe-subnets --query "Subnets[?AvailabilityZone==\`$AWS_AZ2\` && MapPublicIpOnLaunch==\`false\` && VpcId==\`$AWS_VPC_ID\`].SubnetId|[0]" --output text)}
+export AWS_AZ3=${AWS_AZ3:-$(aws ec2 --region $AWS_REGION describe-availability-zones --query 'AvailabilityZones[2].ZoneName' --output text)}
+export AWS_AZ3_SUBNET=${AWS_AZ3_SUBNET:-$(aws ec2 --region $AWS_REGION describe-subnets --query "Subnets[?AvailabilityZone==\`$AWS_AZ3\` && MapPublicIpOnLaunch==\`false\` && VpcId==\`$AWS_VPC_ID\`].SubnetId|[0]" --output text)}
+export AWS_WORKKER_TYPE=${AWS_WORKKER_TYPE:-m6a.4xlarge}
+export AWS_KEYPAIR_NAME=${AWS_KEYPAIR_NAME:-$PROJECT_NAME}
+export AWS_SECURITYGROUP=${AWS_SECURITYGROUP:-$(aws ec2 --region $AWS_REGION describe-security-groups --query "SecurityGroups[?VpcId==\`$AWS_VPC_ID\` && GroupName==\`default\`].GroupId" --output text)}
+
+function infra-validate(){
+
+  banner Validate Infra
+  log "Validate AWS Region         : $AWS_REGION"
+  [[ $(aws ec2 --no-paginate describe-regions --query "length(Regions[?RegionName==\`$AWS_REGION\`])" --output text) == "1" ]] || (log Failed: $AWS_REGION ; exit 1)
+
+  log "Validate AWS VPC            : $AWS_VPC_ID"
+  [[ $(aws ec2 --no-paginate --region $AWS_REGION describe-vpcs --query "length(Vpcs[?VpcId==\`$AWS_VPC_ID\`])" --output text ) == "1" ]] || (log Failed: $AWS_VPC_ID; exit 1)
+
+  log "Validate AWS Security Group : $AWS_SECURITYGROUP"
+  [[ $(aws ec2 --no-paginate --region $AWS_REGION describe-security-groups --query "length(SecurityGroups[?VpcId==\`$AWS_VPC_ID\` && GroupId==\`$AWS_SECURITYGROUP\`])" --output text ) == "1" ]] || (log Failed: $AWS_SECURITYGROUP; exit 1)
+
+  log "Validate AWS AZ1            : $AWS_AZ1"
+  [[ $(aws ec2 --no-paginate --region $AWS_REGION describe-availability-zones --query "length(AvailabilityZones[?ZoneName==\`$AWS_AZ1\`])" --output text) == "1" ]] || (log Failed: $AWS_AZ1; exit 1)
+
+  log "Validate AWS AZ1 Subnet     : $AWS_AZ1_SUBNET"
+  [[ $(aws ec2 --no-paginate --region $AWS_REGION describe-subnets --query "length(Subnets[?SubnetId==\`$AWS_AZ1_SUBNET\` && AvailabilityZone==\`$AWS_AZ1\` && VpcId==\`$AWS_VPC_ID\`])") == "1" ]] || (log Failed:  $AWS_AZ1_SUBNET; exit 1)
+
+  log "Validate AWS AZ2            : $AWS_AZ2"
+  [[ $(aws ec2 --no-paginate --region $AWS_REGION describe-availability-zones --query "length(AvailabilityZones[?ZoneName==\`$AWS_AZ2\`])" --output text) == "1" ]] || (log Failed: $AWS_AZ2; exit 1)
+
+  log "Validate AWS AZ2 Subnet     : $AWS_AZ2_SUBNET"
+  [[ $(aws ec2 --no-paginate --region $AWS_REGION describe-subnets --query "length(Subnets[?SubnetId==\`$AWS_AZ2_SUBNET\` && AvailabilityZone==\`$AWS_AZ2\` && VpcId==\`$AWS_VPC_ID\`])") == "1" ]] || (log Failed:  $AWS_AZ2_SUBNET; exit 1)
+
+  log "Validate AWS AZ3            : $AWS_AZ3"
+  [[ $(aws ec2 --no-paginate --region $AWS_REGION describe-availability-zones --query "length(AvailabilityZones[?ZoneName==\`$AWS_AZ3\`])" --output text) == "1" ]] || (log Failed: $AWS_AZ3; exit 1)
+
+
+  log "Validate AWS AZ3 Subnet     : $AWS_AZ3_SUBNET"
+  [[ $(aws ec2 --no-paginate --region $AWS_REGION describe-subnets --query "length(Subnets[?SubnetId==\`$AWS_AZ3_SUBNET\` && AvailabilityZone==\`$AWS_AZ3\` && VpcId==\`$AWS_VPC_ID\`])") == "1" ]] || (log Failed:  $AWS_AZ3_SUBNET; exit 1)
+
+  log "Validate AWS Key Pair       : $AWS_KEYPAIR_NAME"
+  [[ $(aws ec2 --no-paginate --region $AWS_REGION describe-key-pairs --query "length(KeyPairs[?KeyName==\`$PROJECT_NAME\`])" --output text) == "1" ]] || log Not Found. Will be created
+
+}
+function _env(){
+  env | grep -E '^(AWS_|PROJECT_|YBA_)' | grep -vE '(AWS_SECRET_ACCESS_KEY|AWS_SESSION_TOKEN)' | sort
+}
 
 function yba-login(){
-
   YBA_AUTH_TOKEN=$(curl $YBA_API/login \
       -ksSL \
       -H content-type:application/json \
@@ -64,7 +114,8 @@ function yba-login(){
 
 function start(){
   banner "Start Demo"
-  iam-setup
+  infra-validate
+  security-setup
   k8s-setup
   yba-setup
   yba-create-db
@@ -75,26 +126,49 @@ function stop(){
   yba-delete-db
   yba-destroy
   k8s-destroy
-  iam-destroy
+  security-destroy
 }
 
-function iam-setup(){
-  log "Create policy[$PROJECT_NAME-YBA-Policy]"
-  aws iam create-policy --no-paginate --policy-name $PROJECT_NAME-YBA-Policy --tags $AWS_COMMON_TAGS Key=yb_name,Value=$PROJECT_NAME-YBA-Policy --policy-document file://$PROJECT_CONFIG_DIR/yba-user-policy.json --query="Policy.Arn" --output text
+function security-setup(){
+
+  log "Configure IAM"
+
+  if [[ "0" == $(aws iam list-policies --scope Local --query "length(Policies[?PolicyName==\`$PROJECT_NAME-YBA-Policy\`])") ]] ; then
+    log "Create policy[$PROJECT_NAME-YBA-Policy]"
+    aws iam create-policy --no-paginate --policy-name $PROJECT_NAME-YBA-Policy --tags $AWS_COMMON_TAGS Key=yb_name,Value=$PROJECT_NAME-YBA-Policy --policy-document file://$PROJECT_CONFIG_DIR/yba-user-policy.json --query="Policy.Arn" --output text
+  fi
+
+  if [[ "0" == $(aws iam list-users --query "length(Users[?UserName==\`$PROJECT_NAME-SA\`])") ]]; then
+    log "Create user[$PROJECT_NAME-SA]"
+    aws iam create-user --no-paginate --user-name $PROJECT_NAME-SA --tags $AWS_COMMON_TAGS Key=yb_name,Value=$PROJECT_NAME-SA --query "User.Arn" --output text
+  fi
 
   YBA_IAM_POLICY_ARN=$(aws iam list-policies --scope Local --query "Policies[?PolicyName==\`$PROJECT_NAME-YBA-Policy\`].Arn|[0]" --output text)
-  log Cretest IAM Policy YBA_IAM_POLICY_ARN=$YBA_IAM_POLICY_ARN
-  aws iam create-user --no-paginate --user-name $PROJECT_NAME-SA --tags $AWS_COMMON_TAGS Key=yb_name,Value=$PROJECT_NAME-SA --query "User.Arn" --output text
   aws iam attach-user-policy --no-paginate --user-name $PROJECT_NAME-SA --policy-arn $YBA_IAM_POLICY_ARN
-  IAM_RESPONSE=$(aws iam create-access-key --user-name $PROJECT_NAME-SA)
-  export YBA_AWS_ACCESS_KEY_ID=$(echo "$IAM_RESPONSE" | jq -r '.AccessKey.AccessKeyId')
-  export YBA_AWS_SECRET_ACCESS_KEY=$(echo "$IAM_RESPONSE" | jq -r '.AccessKey.SecretAccessKey')
-  set-config YBA_AWS_ACCESS_KEY_ID $YBA_AWS_ACCESS_KEY_ID
-  set-config YBA_AWS_SECRET_ACCESS_KEY $YBA_AWS_SECRET_ACCESS_KEY
 
+  if [[ -z $YBA_AWS_ACCESS_KEY_ID ]]; then
+    IAM_RESPONSE=$(aws iam create-access-key --user-name $PROJECT_NAME-SA)
+    export YBA_AWS_ACCESS_KEY_ID=$(echo "$IAM_RESPONSE" | jq -r '.AccessKey.AccessKeyId')
+    export YBA_AWS_SECRET_ACCESS_KEY=$(echo "$IAM_RESPONSE" | jq -r '.AccessKey.SecretAccessKey')
+    set-config YBA_AWS_ACCESS_KEY_ID $YBA_AWS_ACCESS_KEY_ID
+    set-config YBA_AWS_SECRET_ACCESS_KEY $
+  fi
+
+  log Setup SSH Keys
+  if [[ ! -f $PROJECT_CONFIG_DIR/$PROJECT_NAME-sshkey ]]; then
+    log Create SSH Key
+    ssh-keygen -t rsa -f $PROJECT_CONFIG_DIR/$PROJECT_NAME-sshkey -N ''
+  fi
+
+  if [[ "0" == $(aws ec2 --region $AWS_REGION describe-key-pairs  --query "length(KeyPairs[?KeyName==\`$PROJECT_NAME\`])") ]] ; then
+    log Create Key Pair
+    aws ec2 --region $AWS_REGION import-key-pair --key-name $PROJECT_NAME --public-key-material fileb://$PROJECT_CONFIG_DIR/$PROJECT_NAME-sshkey.pub
+  fi
 }
-function iam-destroy(){
+function security-destroy(){
   set +e
+
+  aws ec2 --region $AWS_REGION delete-key-pair --key-name $PROJECT_NAME
 
   if [[ -n "${YBA_AWS_ACCESS_KEY_ID:-}" ]]; then
     log "Delete access keys[$YBA_AWS_ACCESS_KEY_ID] for sa user[$PROJECT_NAME-SA]"
@@ -169,19 +243,19 @@ function k8s-delete-pdb(){
   kubectl delete poddisruptionbudget -n kube-system coredns
 }
 function pause(){
-   aws eks update-nodegroup-config --no-paginate --cluster-name $PROJECT_NAME --nodegroup-name $PROJECT_NAME-wkr-a \
+   aws eks --region $AWS_REGION update-nodegroup-config --no-paginate --cluster-name $PROJECT_NAME --nodegroup-name $PROJECT_NAME-wkr-a \
     --scaling-config minSize=0,maxSize=3,desiredSize=0
-   aws eks update-nodegroup-config --no-paginate --cluster-name $PROJECT_NAME --nodegroup-name $PROJECT_NAME-wkr-b \
+   aws eks --region $AWS_REGION update-nodegroup-config --no-paginate --cluster-name $PROJECT_NAME --nodegroup-name $PROJECT_NAME-wkr-b \
     --scaling-config minSize=0,maxSize=3,desiredSize=0
-   aws eks update-nodegroup-config --no-paginate --cluster-name $PROJECT_NAME --nodegroup-name $PROJECT_NAME-wkr-c \
+   aws eks --region $AWS_REGION update-nodegroup-config --no-paginate --cluster-name $PROJECT_NAME --nodegroup-name $PROJECT_NAME-wkr-c \
     --scaling-config minSize=0,maxSize=3,desiredSize=0
 }
 function resume(){
-   aws eks update-nodegroup-config --no-paginate --cluster-name $PROJECT_NAME --nodegroup-name $PROJECT_NAME-wkr-a \
+   aws eks --region $AWS_REGION update-nodegroup-config --no-paginate --cluster-name $PROJECT_NAME --nodegroup-name $PROJECT_NAME-wkr-a \
     --scaling-config minSize=0,maxSize=3,desiredSize=1
-   aws eks update-nodegroup-config --no-paginate --cluster-name $PROJECT_NAME --nodegroup-name $PROJECT_NAME-wkr-b \
+   aws eks --region $AWS_REGION update-nodegroup-config --no-paginate --cluster-name $PROJECT_NAME --nodegroup-name $PROJECT_NAME-wkr-b \
     --scaling-config minSize=0,maxSize=3,desiredSize=1
-   aws eks update-nodegroup-config --no-paginate --cluster-name $PROJECT_NAME --nodegroup-name $PROJECT_NAME-wkr-c \
+   aws eks --region $AWS_REGION update-nodegroup-config --no-paginate --cluster-name $PROJECT_NAME --nodegroup-name $PROJECT_NAME-wkr-c \
     --scaling-config minSize=0,maxSize=3,desiredSize=1
 }
 
