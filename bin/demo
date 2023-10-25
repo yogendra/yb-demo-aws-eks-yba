@@ -2,33 +2,33 @@
 set -Eeuo pipefail
 export SCRIPT_DIR=$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )
 export SCRIPT=${BASH_SOURCE[0]}
+source $SCRIPT_DIR/common-functions.sh
 
 export PROJECT_DIR=${PROJECT_DIR:-$(cd $SCRIPT_DIR/..; pwd)}
 export PROJECT_CONFIG_DIR=${PROJECT_CONFIG_DIR:-$(cd $PROJECT_DIR/config; pwd)}
 export PROJECT_ENV_FILE=${PROJECT_ENV_FILE:-$PROJECT_CONFIG_DIR/demo.env}
+touch $PROJECT_ENV_FILE
+source $PROJECT_ENV_FILE
 
 export PROJECT_NAME=${PROJECT_NAME?"Project Name not set"}
 export AWS_HOSTEDZONE_ID=${AWS_HOSTEDZONE_ID?"must be set in config file"}
 export AWS_HOSTEDZONE_ROOT_DOMAIN=${AWS_HOSTEDZONE_ROOT_DOMAIN:-$(aws route53  get-hosted-zone --id $AWS_HOSTEDZONE_ID --query "HostedZone.Name" --output text | sed 's/\.$//')}
+
+
 export PROJECT_USER=${PROJECT_USER:-$USER}
-export AWS_COMMON_TAGS="Key=yb_owner,Value='$PROJECT_USER' Key=yb_dept,Value=sales Key=yb_project,Value='$PROJECT_NAME' Key=yb_env,Value=demo Key=yb_task,Value=demo"
-
-touch $PROJECT_ENV_FILE
-source $PROJECT_ENV_FILE
-
+export AWS_COMMON_TAGS=${AWS_COMMON_TAGS:-"Key=yb_owner,Value='$PROJECT_USER' Key=yb_dept,Value=sales Key=yb_project,Value='$PROJECT_NAME' Key=yb_env,Value=demo Key=yb_task,Value=demo"}
 export PROJECT_DOMAIN=${PROJECT_DOMAIN:-$PROJECT_NAME.$AWS_HOSTEDZONE_ROOT_DOMAIN}
-
 export K8S_CLUSTER_CONFIG=${K8S_CLUSTER_CONFIG:-$PROJECT_CONFIG_DIR/eks.yaml}
-
 export INGRESS_NGINX_HELM_VALUES=${INGRESS_NGINX_HELM_VALUES:-$PROJECT_CONFIG_DIR/ingress-nginx-values.yaml}
-
 export CERT_MANAGER_CONFIG=${CERT_MANAGER_CONFIG:-$PROJECT_CONFIG_DIR/certs.yaml}
-
 export YBA_HELM_VALUES=${YBA_HELM_VALUES:-$PROJECT_CONFIG_DIR/yugaware-values.yaml}
 export YBA_LICENSE=${YB_LICENSE:-$PROJECT_CONFIG_DIR/yugabyte-*-secret.yml}
 export YBA_LICENSE_VALUE=$(jq -Rs < $YBA_LICENSE)
+
 export YBA_K8S_STORAGECLASS=${YBA_K8S_STORAGECLASS:-gp3}
+
 export YBA_NS=${YBA_NS:-yb-platform}
+
 export YBA_HELM_RELEASE=${YBA_HELM_RELEASE:-yba}
 
 export YBA_HOSTNAME=${YBA_HOSTNAME:-yba.$PROJECT_DOMAIN}
@@ -41,6 +41,7 @@ export YBA_BACKUP_BUCKET=${YBA_BACKUP_BUCKET:-yugabyte-apj-demo-backup}
 export YBA_VERSION=${YBA_VERSION:-2.18.2.1-b1}
 export YBA_HELM_VERSION=${YBA_HELM_VERSION:-2.18.2+1}
 export YBA_K8S_PROVIDER_NAME=${YBA_K8S_PROVIDER_NAME:-$PROJECT_NAME}
+
 export AWS_REGION=${AWS_REGION:-$(aws configure get region)}
 export AWS_VPC_ID=${AWS_VPC_ID:-$(aws ec2 --region $AWS_REGION describe-vpcs --query 'Vpcs[?IsDefault==`true`].VpcId' --output text)}
 export AWS_AZ1=${AWS_AZ1:-$(aws ec2 --region $AWS_REGION describe-availability-zones --query 'AvailabilityZones[0].ZoneName' --output text)}
@@ -49,9 +50,9 @@ export AWS_AZ2=${AWS_AZ2:-$(aws ec2 --region $AWS_REGION describe-availability-z
 export AWS_AZ2_SUBNET=${AWS_AZ2_SUBNET:-$(aws ec2 --region $AWS_REGION describe-subnets --query "Subnets[?AvailabilityZone==\`$AWS_AZ2\` && MapPublicIpOnLaunch==\`false\` && VpcId==\`$AWS_VPC_ID\`].SubnetId|[0]" --output text)}
 export AWS_AZ3=${AWS_AZ3:-$(aws ec2 --region $AWS_REGION describe-availability-zones --query 'AvailabilityZones[2].ZoneName' --output text)}
 export AWS_AZ3_SUBNET=${AWS_AZ3_SUBNET:-$(aws ec2 --region $AWS_REGION describe-subnets --query "Subnets[?AvailabilityZone==\`$AWS_AZ3\` && MapPublicIpOnLaunch==\`false\` && VpcId==\`$AWS_VPC_ID\`].SubnetId|[0]" --output text)}
-export AWS_WORKKER_TYPE=${AWS_WORKKER_TYPE:-m6a.4xlarge}
-export AWS_KEYPAIR_NAME=${AWS_KEYPAIR_NAME:-$PROJECT_NAME}
 export AWS_SECURITYGROUP=${AWS_SECURITYGROUP:-$(aws ec2 --region $AWS_REGION describe-security-groups --query "SecurityGroups[?VpcId==\`$AWS_VPC_ID\` && GroupName==\`default\`].GroupId" --output text)}
+export AWS_WORKER_TYPE=${AWS_WORKER_TYPE:-m7a.2xlarge}
+export AWS_KEYPAIR_NAME=${AWS_KEYPAIR_NAME:-$PROJECT_NAME}
 
 function infra-validate(){
 
@@ -114,44 +115,75 @@ function yba-login(){
 
 function start(){
   banner "Start Demo"
+  config-cache
   infra-validate
   security-setup
   k8s-setup
   yba-setup
-  yba-create-db
+  yba-db-create
 }
 function stop(){
   banner "Stop Demo"
   set +e
-  yba-delete-db
+  yba-db-delete
   yba-destroy
   k8s-destroy
   security-destroy
+  config-cache-clear
 }
-
+function config-cache(){
+  banner Cache config
+  set-config AWS_HOSTEDZONE_ROOT_DOMAIN $AWS_HOSTEDZONE_ROOT_DOMAIN
+  set-config AWS_REGION $AWS_REGION
+  set-config AWS_VPC_ID $AWS_VPC_ID
+  set-config AWS_AZ1 $AWS_AZ1
+  set-config AWS_AZ1_SUBNET $AWS_AZ1_SUBNET
+  set-config AWS_AZ2 $AWS_AZ2
+  set-config AWS_AZ2_SUBNET $AWS_AZ2_SUBNET
+  set-config AWS_AZ3 $AWS_AZ3
+  set-config AWS_AZ3_SUBNET $AWS_AZ3_SUBNET
+  set-config AWS_SECURITYGROUP $AWS_SECURITYGROUP
+}
+function config-cache-clear(){
+  banner Clean Cache config
+  unset-config AWS_HOSTEDZONE_ROOT_DOMAIN
+  unset-config AWS_REGION
+  unset-config AWS_VPC_ID
+  unset-config AWS_AZ1
+  unset-config AWS_AZ1_SUBNET
+  unset-config AWS_AZ2
+  unset-config AWS_AZ2_SUBNET
+  unset-config AWS_AZ3
+  unset-config AWS_AZ3_SUBNET
+  unset-config AWS_SECURITYGROUP
+}
 function security-setup(){
 
-  log "Configure IAM"
+  banner "Configure Security"
 
   if [[ "0" == $(aws iam list-policies --scope Local --query "length(Policies[?PolicyName==\`$PROJECT_NAME-YBA-Policy\`])") ]] ; then
     log "Create policy[$PROJECT_NAME-YBA-Policy]"
     aws iam create-policy --no-paginate --policy-name $PROJECT_NAME-YBA-Policy --tags $AWS_COMMON_TAGS Key=yb_name,Value=$PROJECT_NAME-YBA-Policy --policy-document file://$PROJECT_CONFIG_DIR/yba-user-policy.json --query="Policy.Arn" --output text
   fi
 
+  log Setup AWS User
   if [[ "0" == $(aws iam list-users --query "length(Users[?UserName==\`$PROJECT_NAME-SA\`])") ]]; then
     log "Create user[$PROJECT_NAME-SA]"
     aws iam create-user --no-paginate --user-name $PROJECT_NAME-SA --tags $AWS_COMMON_TAGS Key=yb_name,Value=$PROJECT_NAME-SA --query "User.Arn" --output text
   fi
 
+  log Setup AWS User Policy
   YBA_IAM_POLICY_ARN=$(aws iam list-policies --scope Local --query "Policies[?PolicyName==\`$PROJECT_NAME-YBA-Policy\`].Arn|[0]" --output text)
   aws iam attach-user-policy --no-paginate --user-name $PROJECT_NAME-SA --policy-arn $YBA_IAM_POLICY_ARN
 
-  if [[ -z $YBA_AWS_ACCESS_KEY_ID ]]; then
+  log Setup Access Keys
+  if [[ -z "${YBA_AWS_ACCESS_KEY_ID:-}" ]]; then
+    log Create Access Keys
     IAM_RESPONSE=$(aws iam create-access-key --user-name $PROJECT_NAME-SA)
     export YBA_AWS_ACCESS_KEY_ID=$(echo "$IAM_RESPONSE" | jq -r '.AccessKey.AccessKeyId')
     export YBA_AWS_SECRET_ACCESS_KEY=$(echo "$IAM_RESPONSE" | jq -r '.AccessKey.SecretAccessKey')
     set-config YBA_AWS_ACCESS_KEY_ID $YBA_AWS_ACCESS_KEY_ID
-    set-config YBA_AWS_SECRET_ACCESS_KEY $
+    set-config YBA_AWS_SECRET_ACCESS_KEY $YBA_AWS_SECRET_ACCESS_KEY
   fi
 
   log Setup SSH Keys
@@ -159,9 +191,9 @@ function security-setup(){
     log Create SSH Key
     ssh-keygen -t rsa -f $PROJECT_CONFIG_DIR/$PROJECT_NAME-sshkey -N ''
   fi
-
+  log Setup AWS Key Pair
   if [[ "0" == $(aws ec2 --region $AWS_REGION describe-key-pairs  --query "length(KeyPairs[?KeyName==\`$PROJECT_NAME\`])") ]] ; then
-    log Create Key Pair
+    log Create AWS Key Pair
     aws ec2 --region $AWS_REGION import-key-pair --key-name $PROJECT_NAME --public-key-material fileb://$PROJECT_CONFIG_DIR/$PROJECT_NAME-sshkey.pub
   fi
 }
@@ -192,8 +224,8 @@ function security-destroy(){
 
   YBA_IAM_POLICY_ARN=$(aws iam list-policies --scope Local --query "Policies[?PolicyName==\`$PROJECT_NAME-YBA-Policy\`].Arn|[0]" --output text)
 
-  if [[ "$YBA_IAM_POLICY_ARN" != "null" ]] ; then
-    log "Delete user policy[$YBA_IAM_POLICY_ARN]"
+  if [[ "$YBA_IAM_POLICY_ARN" != "None" ]] ; then
+    log "Delete user policy [$YBA_IAM_POLICY_ARN]"
     aws iam delete-policy --policy-arn $YBA_IAM_POLICY_ARN
   fi
 
@@ -202,43 +234,43 @@ function security-destroy(){
 
 function k8s-setup(){
   banner "Setup K8s"
-  k8s-create-cluster
-  k8s-create-common-services
+  k8s-cluster-create
+  k8s-common-services-create
 }
 function k8s-destroy(){
   banner "Destroy K8s"
-  k8s-delete-common-services
-  k8s-delete-cluster
+  k8s-common-services-delete
+  k8s-cluster-delete
 }
-function k8s-create-cluster(){
+function k8s-cluster-create(){
   banner "Create K8s cluster"
   cat $K8S_CLUSTER_CONFIG| envsubst | eksctl create cluster -f-
-  k8s-configure-kubeconfig
+  k8s-kubeconfig-configure
 
 }
-function k8s-delete-cluster(){
+function k8s-cluster-delete(){
   banner "Delete K8s Cluster"
   cat $K8S_CLUSTER_CONFIG| envsubst | eksctl delete cluster -f-
 }
 
-function k8s-configure-kubeconfig(){
+function k8s-kubeconfig-configure(){
   kubectl config delete-context $PROJECT_NAME || true
   kubectl config rename-context $(kubectl config current-context) $PROJECT_NAME
 }
-function k8s-create-common-services(){
+function k8s-common-services-create(){
   log "Create common K8s services"
-  k8s-create-sc
-  k8s-create-cert-manager
-  k8s-create-ingress
+  k8s-sc-create
+  k8s-cert-manager-create
+  k8s-ingress-create
 }
-function k8s-delete-common-services(){
+function k8s-common-services-delete(){
   log "Delete common K8s services"
-  k8s-delete-ingress
-  k8s-delete-cert-manager
-  k8s-delete-sc
-  k8s-delete-pdb
+  k8s-ingress-delete
+  k8s-cert-manager-delete
+  k8s-sc-delete
+  k8s-pdb-delete
 }
-function k8s-delete-pdb(){
+function k8s-pdb-delete(){
   kubectl delete poddisruptionbudget -n kube-system ebs-csi-controller
   kubectl delete poddisruptionbudget -n kube-system coredns
 }
@@ -259,28 +291,30 @@ function resume(){
     --scaling-config minSize=0,maxSize=3,desiredSize=1
 }
 
-function k8s-create-sc(){
+function k8s-sc-create(){
   log "Create SC: gp3"
   kubectl apply -f $PROJECT_CONFIG_DIR/gp3.yaml
 }
-function k8s-delete-sc(){
+function k8s-sc-delete(){
   log "Delete SC: gp3"
   kubectl delete -f $PROJECT_CONFIG_DIR/gp3.yaml
 }
 
-function k8s-create-cert-manager(){
+function k8s-cert-manager-create(){
   kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.13.1/cert-manager.yaml
   kubectl wait pods -n cert-manager  -l app.kubernetes.io/component=webhook --for=condition=Ready
   kubectl apply -f $CERT_MANAGER_CONFIG
 }
 
-function k8s-delete-cert-manager(){
+function k8s-cert-manager-delete(){
   kubectl delete -f $CERT_MANAGER_CONFIG
   kubectl delete -f https://github.com/cert-manager/cert-manager/releases/download/v1.13.1/cert-manager.yaml
 }
 
-function k8s-create-ingress(){
+function k8s-ingress-create(){
   log "Setup ingress"
+  helm repo add ingress-nginx https://kubernetes.github.io/ingress-nginx
+  helm repo update
   helm upgrade --install  ingress-nginx -n ingress-nginx --create-namespace ingress-nginx/ingress-nginx -f $INGRESS_NGINX_HELM_VALUES
 
   log "Wait for ingress LB address"
@@ -332,7 +366,7 @@ EOF
   done
   log "Done"
 }
-function  k8s-delete-ingress(){
+function  k8s-ingress-delete(){
   set +e
   INGRESS_CONTROLLER_ADDRESS=$(kubectl get service  -n ingress-nginx  ingress-nginx-controller -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')
   DNS_CHANGE=$(cat<<EOF | jq -Mc
@@ -376,15 +410,15 @@ EOF
 
 function yba-setup(){
   yba-install
-  yba-register-user
+  yba-user-register
   source $PROJECT_ENV_FILE
-  yba-configure-cloud
-  yba-configure-backup
-  yba-configure-kms
+  yba-cloud-configure
+  yba-backup-configure
+  yba-kms-configure
   yba-info
 }
 function yba-destroy(){
-  yba-unregister-user
+  yba-user-unregister
   yba-uninstall
 
 }
@@ -396,6 +430,12 @@ function yba-install(){
 
   log "Setup license"
   kubectl apply -n $YBA_NS -f $YBA_LICENSE
+
+  log "Setup Helm"
+  helm repo add yugabytedb https://charts.yugabyte.com
+  helm repo add ealenn https://ealenn.github.io/charts
+  helm repo add jetstack https://charts.jetstack.io
+  helm repo update
 
   log "Install YBA"
   helm upgrade --install \
@@ -438,7 +478,7 @@ function yba-uninstall(){
   kubectl delete ns $YBA_NS
 }
 
-function yba-register-user(){
+function yba-user-register(){
   log "YBA Register user"
 
   REGISTER_REQUEST_JSON=$(cat <<-EOF | jq -cM
@@ -501,7 +541,7 @@ EOF
   export YBA_HOSTNAME YBA_PORTAL YBA_API YBA_API_TOKEN YBA_CUSTOMER_UUID YBA_CUSTOMER_API YBA_USER_UUID YBA_AUTH_HEADER
   log "User registration done"
 }
-function yba-unregister-user(){
+function yba-user-unregister(){
   log "Cleanup User config"
   unset-config YBA_HOSTNAME
   unset-config YBA_PORTAL
@@ -512,7 +552,7 @@ function yba-unregister-user(){
   unset-config YBA_USER_UUID
   unset-config YBA_AUTH_HEADER
 }
-function yba-configure-cloud(){
+function yba-cloud-configure(){
   log "YBA Configure cloud"
   YBA_K8S_PROVIDER_REQUEST_JSON=$(cat <<EOF | jq -cM
   {
@@ -590,7 +630,7 @@ EOF
   # YBA_K8S_PROVIDER_UUID=$(echo "$YBA_K8S_PROVIDER_RESPONSE_JSON" | jq -r '.resourceUUID' )
 }
 
-function yba-configure-backup(){
+function yba-backup-configure(){
   log "Config Backup"
   YBA_BACKUP_CONFIG_REQUEST=$(cat <<EOF | jq -cM
   {
@@ -616,7 +656,7 @@ EOF
   )
 }
 
-function yba-configure-kms(){
+function yba-kms-configure(){
   log "Config KMS"
   YBA_KMS_CONFIG_REQUEST=$(cat <<EOF | jq -cM
   {
@@ -639,17 +679,17 @@ EOF
 }
 
 
-function yba-create-db(){
+function yba-db-create(){
   banner "Create DB"
-  yba-create-universe db1 $YBA_K8S_PROVIDER_NAME
+  yba-universe-create db1 $YBA_K8S_PROVIDER_NAME
   wls-deploy db1
 }
-function yba-delete-db(){
+function yba-db-delete(){
   banner "Delete DB"
   wls-undeploy db1
-  yba-delete-universe db1
+  yba-universe-delete db1
 }
-function yba-create-universe(){
+function yba-universe-create(){
   export DB_NAME=$1;shift
   export PROVIDER_NAME=$1;shift
   export YB_VERSION=${YB_VERSION:-$YBA_VERSION}
@@ -695,11 +735,11 @@ function yba-create-universe(){
     --data-raw "$UNIVERSE_CREATE_REQUEST"
   )
   TASK_UUID=$(echo "$UNIVERSE_CREATE_RESPONSE" | jq -r '.taskUUID')
-  yba-wait-for-task $TASK_UUID
+  yba-task-wait $TASK_UUID
   log "$DB_NAME: Universe Created"
 }
 
-function yba-delete-universe(){
+function yba-universe-delete(){
   export DB_NAME=$1;shift
   log "$DB_NAME: Delete Universe"
   UNIVERSE_UUID=$(curl $YBA_CUSTOMER_API/universes?name=$DB_NAME \
@@ -722,12 +762,12 @@ function yba-delete-universe(){
     -X DELETE
   )
   TASK_UUID=$(echo "$UNIVERSE_DELETE_RESPONSE" | jq -r '.taskUUID')
-  yba-wait-for-task $TASK_UUID
+  yba-task-wait $TASK_UUID
   log "$DB_NAME: Universe Deleted"
 }
 function wls-deploy(){
   db=${1?"DB Name missing"}
-  tservers=$(get-universe-tservers $db)
+  tservers=$(universe-tservers $db)
   export DB_NAME=$db
   export WLS_HOSTNAME=$DB_NAME-wls.$PROJECT_DOMAIN
   export SERVER_NAME=$(echo "$tservers" | head -1 | cut -f1 -d:)
@@ -748,7 +788,7 @@ function wls-undeploy(){
   export WLS_HOSTNAME=$DB_NAME-wls.$PROJECT_DOMAIN
   cat $PROJECT_CONFIG_DIR/wls.yaml | envsubst | kubectl delete -n yb-platform -f-
 }
-function yba-wait-for-task(){
+function yba-task-wait(){
   TASK_UUID=$1;shift
   while true;
   do
@@ -768,7 +808,7 @@ function yba-wait-for-task(){
     sleep 5
   done
 }
-function get-universe-tservers(){
+function universe-tservers(){
   universe_name=${1?"Universe name missing"}
   universe_uuid=$(
     curl $YBA_CUSTOMER_API/universes?name=$universe_name\
@@ -789,27 +829,27 @@ function get-universe-tservers(){
       tr ',' '\n'
 
 }
-function set-config(){
-  key=$1;shift
-  value="$@"; shift
-  [[ -f $PROJECT_ENV_FILE ]]  || touch $PROJECT_ENV_FILE
-  config=$(cat $PROJECT_ENV_FILE)
-  config="$(echo "$config" | grep -v "export $key=" | sort)"
-  if [[ -n $value ]]; then
-  cat <<EOF | sort > $PROJECT_ENV_FILE
-$config
-export $key="$value"
-EOF
-  else
-  cat <<EOF | sort > $PROJECT_ENV_FILE
-$config
-EOF
-  fi
-}
-function unset-config(){
-  key=$1;shift
-  set-config $key ""
-}
+# function set-config(){
+#   key=$1;shift
+#   value="$@"; shift
+#   [[ -f $PROJECT_ENV_FILE ]]  || touch $PROJECT_ENV_FILE
+#   config=$(cat $PROJECT_ENV_FILE)
+#   config="$(echo "$config" | grep -v "export $key=" | sort)"
+#   if [[ -n $value ]]; then
+#   cat <<EOF | sort > $PROJECT_ENV_FILE
+# $config
+# export $key="$value"
+# EOF
+#   else
+#   cat <<EOF | sort > $PROJECT_ENV_FILE
+# $config
+# EOF
+#   fi
+# }
+# function unset-config(){
+#   key=$1;shift
+#   set-config $key ""
+# }
 function yba-info(){
   cat <<EOF
 Summary
@@ -837,17 +877,17 @@ curl \\
 EOF
 }
 
-function log(){
-  echo $(date +"[%Y-%m-%d %H:%m:%S]") "$@"
-}
+# function log(){
+#   echo $(date +"[%Y-%m-%d %H:%m:%S]") "$@"
+# }
 
-function banner(){
-  cat <<EOF
-========================================================================
-$@
-========================================================================
-EOF
-}
+# function banner(){
+#   cat <<EOF
+# ========================================================================
+# $@
+# ========================================================================
+# EOF
+# }
 
 op=$1; shift
 $op "$@"
