@@ -90,7 +90,11 @@ function infra-validate(){
 
 }
 function _env(){
-  env | grep -E '^(AWS_|PROJECT_|YBA_)' | grep -vE '(AWS_SECRET_ACCESS_KEY|AWS_SESSION_TOKEN)' | sort
+  env | grep -E '^(AWS_|PROJECT_|YBA_)' | grep -vE '(AWS_SECRET_ACCESS_KEY|AWS_SESSION_TOKEN|AWS_CREDENTIAL_EXPIRATION)' | sort
+}
+function _env-export(){
+  _env | sed 's/^/export /'
+  # _env
 }
 
 function yba-login(){
@@ -366,7 +370,7 @@ EOF
   done
   log "Done"
 }
-function  k8s-ingress-delete(){
+function k8s-ingress-delete(){
   set +e
   INGRESS_CONTROLLER_ADDRESS=$(kubectl get service  -n ingress-nginx  ingress-nginx-controller -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')
   DNS_CHANGE=$(cat<<EOF | jq -Mc
