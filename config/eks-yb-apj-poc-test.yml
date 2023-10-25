@@ -44,7 +44,7 @@ managedNodeGroups:
   - name: test1-wkr-1
     availabilityZones:
     - ap-southeast-1a
-    instanceType: m5.large
+    instanceType: m7a.2xlarge
     minSize: 0
     maxSize: 3
     desiredCapacity: 1
@@ -78,7 +78,7 @@ managedNodeGroups:
   - name: test1-wkr-2
     availabilityZones:
     - ap-southeast-1b
-    instanceType: m5.large
+    instanceType: m7a.2xlarge
     minSize: 0
     maxSize: 3
     desiredCapacity: 1
@@ -112,7 +112,7 @@ managedNodeGroups:
   - name: test1-wkr-3
     availabilityZones:
     - ap-southeast-1c
-    instanceType: m5.large
+    instanceType: m7a.2xlarge
     minSize: 0
     maxSize: 3
     desiredCapacity: 1
