@@ -116,6 +116,17 @@ Optional Config variables
 | Variable                   | Description                                     | Default                                       |
 | -------------------------- | ----------------------------------------------- | --------------------------------------------- |
 | AWS_HOSTEDZONE_ROOT_DOMAIN | Root domain under which sub-domain is created   | *Automatically found from the hosted zone*    |
+| AWS_REGION                 | AWS Region to deploy cluster                    | Based on profile                              |
+| AWS_VPC_ID                 | VPC ID                                          | Default VPC in Region                         |
+| AWS_AZ1                    | AWS Availability Zone 1                         | First AZ in the given VPC                     |
+| AWS_AZ1_SUBNET             | AWS Availability Zone 1 Subnet                  | First Private in First AZ in the given VPC    |
+| AWS_AZ2                    | AWS Availability Zone 2                         | Second AZ in the given VPC                    |
+| AWS_AZ2_SUBNET             | AWS Availability Zone 2 Subnet                  | First Private in Second AZ in the given VPC   |
+| AWS_AZ3                    | AWS Availability Zone 3                         | Third AZ in the given VPC                     |
+| AWS_AZ3_SUBNET             | AWS Availability Zone 3 Subnet                  | First Private in Third AZ in the given VPC    |
+| AWS_SECURITY_GROUP         | AWS Security Group                              | Default Security Group in the VPC             |
+| AWS_WORKER_TYPE            | Worker Type                                     | m6a.4xlarge                                   |
+| AWS_KEYPAIR_NAME           |
 | INGRESS_NGINX_HELM_VALUES  | NGINX Ingress Helm Values file                  | $PROJECT_CONFIG_DIR/ingress-nginx-values.yaml |
 | CERT_MANAGER_CONFIG        | Config file for cert-manager based certificates | $PROJECT_CONFIG_DIR/certs.yaml                |
 | K8S_CLUSTER_CONFIG         | EKS Cluster config                              | $PROJECT_CONFIG_DIR/shr-eks-sg.yaml           |
