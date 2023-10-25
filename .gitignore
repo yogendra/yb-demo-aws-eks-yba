@@ -3,3 +3,4 @@ demo.env
 config/yb-platform-ca.crt
 config/yugabyte-*-secret.yml
 .kubeconfig
+config/*sshkey*
