@@ -35,6 +35,7 @@ locals {
   eks-version               = "1.27"
   project-domain            = "${local.project-name}.${local.project-root-domain}"
   yba-domain                = "yba.${local.project-domain}"
+  yba-api-url        = "https://${local.yba-domain}/api/v1"
   yba-username              = "superadmin@yugabyte.com"
   yba-password              = "Password#123"
   azs = slice(data.aws_availability_zones.available.names, 0, 3)
