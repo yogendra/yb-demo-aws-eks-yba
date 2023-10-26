@@ -12,6 +12,10 @@ terraform {
       source  = "hashicorp/helm"
       version = "2.11.0"
     }
+    yba = {
+      source = "yugabyte/yba"
+      version = "0.1.9"
+    }
   }
 }
 
@@ -31,6 +35,8 @@ locals {
   eks-version               = "1.27"
   project-domain            = "${local.project-name}.${local.project-root-domain}"
   yba-domain                = "yba.${local.project-domain}"
+  yba-username              = "superadmin@yugabyte.com"
+  yba-password              = "Password#123"
   azs = slice(data.aws_availability_zones.available.names, 0, 3)
   eks-worker-type          = "m6a.2xlarge"
   yugabyte_k8s_pull_secret = "${path.root}/private/yugabyte-k8s-pull-secret.yaml"

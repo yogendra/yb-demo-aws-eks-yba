@@ -31,7 +31,9 @@ resource "helm_release" "yba" {
   create_namespace = true
   namespace        = "yba"
   values = [
-    file("${path.module}/templates/yba-values.yaml")
+    templatefile("${path.module}/templates/yba-values.yaml",{
+      project-domain = local.project-domain
+    })
   ]
   depends_on = [
     kubernetes_manifest.yugabyte-k8s-pull-secret
@@ -39,9 +41,39 @@ resource "helm_release" "yba" {
 }
 
 ## YBA Ingress
+resource "kubernetes_manifest" "yba-ingress" {
 
+  manifest = merge(
+    yamldecode(
+      templatefile(
+        "${path.module}/templates/yba-ingress.template.yaml", {
+          project-domain = local.project-domain
+        }
+      )
+    ), {
+    metadata = {
+      namespace = "yba"
+      name = "yba-ingress"
+    }
+  })
+  depends_on = [
+    kubernetes_namespace.yba
+  ]
+}
 
-## YBA Register User
+provider "yba" {
+  alias = "unauthenticated"
+  host      = "yba.${local.project-domain}"
 
-## YBA Authenticated Provider
+}
 
+resource "yba_customer_resource" "superadmin" {
+  provider   = yba.unauthenticated
+  code       = "admin"
+  email      = local.yba-username
+  name       = "Super Admin"
+}
+provider "yba" {
+  host      = "yba.${local.project-domain}"
+  api_token = yba_customer_resource.superadmin.api_token
+}
