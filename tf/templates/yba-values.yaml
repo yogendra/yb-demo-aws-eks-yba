@@ -16,3 +16,7 @@ yugaware:
       # service.beta.kubernetes.io/aws-load-balancer-type: nlb
     enabled: true
     type: "ClusterIP"
+  additionAllowedCorsOrigins:
+  - http://yba.${project-domain}
+  - https://yba.${project-domain}
+
