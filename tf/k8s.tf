@@ -18,25 +18,10 @@ resource "helm_release" "cert-manager" {
   ]
 }
 
-resource "kubernetes_secret" "route53-credentials-secret" {
-  metadata {
-    name = "route53-credentials-secret"
-    namespace = "cert-manager"
-  }
-
-  data = {
-    access-key-id = aws_iam_access_key.sa-access-key.id
-    secret-access-key = aws_iam_access_key.sa-access-key.secret
-  }
-
-  type = "Opaque"
-  depends_on = [
-    helm_release.cert-manager
-  ]
-}
 # resource "local_exec" "letsencrypt-prod" {
 
 # }
+
 # resource "kubernetes_manifest" "letsencrypt-prod" {
 #   manifest = yamldecode(
 #     templatefile( "${path.module}/templates/letsencrypt-prod.yaml",{
