@@ -2,17 +2,17 @@ apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
   annotations:
-    cert-manager.io/cluster-issuer: root-ca
+    # cert-manager.io/cluster-issuer: root-ca
   name: yba
 spec:
-  tls:
-  - hosts:
-      - $YBA_HOSTNAME
-      - $YBA_PROM_HOSTNAME
-    secretName: yba-tls
+  # tls:
+  # - hosts:
+  #     - yba.${project-domain}
+  #     - yba-prom.${project-domain}
+  #   secretName: yba-tls
   ingressClassName: nginx
   rules:
-  - host: $YBA_HOSTNAME
+  - host: yba.${project-domain}
     http:
       paths:
       - backend:
@@ -22,7 +22,7 @@ spec:
               number: 80
         path: /
         pathType: Prefix
-  - host: $YBA_PROM_HOSTNAME
+  - host: yba-prom.${project-domain}
     http:
       paths:
       - backend:
