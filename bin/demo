@@ -119,23 +119,35 @@ function yba-login(){
 
 function start(){
   banner "Start Demo"
-  config-cache
-  infra-validate
-  security-setup
-  k8s-setup
-  yba-setup
-  yba-db-create
+  infra-setup
+  yugabyte-setup
 }
 function stop(){
   banner "Stop Demo"
   set +e
-  yba-db-delete
-  yba-destroy
+  yugabyte-destroy
+  infra-destroy
+}
+function infra-setup(){
+  infra-validate
+  security-setup
+  k8s-setup
+}
+function infra-destroy(){
   k8s-destroy
   security-destroy
-  config-cache-clear
 }
-function config-cache(){
+function yugabyte-setup(){
+  yba-setup
+  yba-db-create
+}
+
+function yugabyte-destroy(){
+  yba-db-delete
+  yba-destroy
+}
+
+function configure(){
   banner Cache config
   set-config AWS_HOSTEDZONE_ROOT_DOMAIN $AWS_HOSTEDZONE_ROOT_DOMAIN
   set-config AWS_REGION $AWS_REGION
@@ -148,7 +160,7 @@ function config-cache(){
   set-config AWS_AZ3_SUBNET $AWS_AZ3_SUBNET
   set-config AWS_SECURITYGROUP $AWS_SECURITYGROUP
 }
-function config-cache-clear(){
+function deconfigure(){
   banner Clean Cache config
   unset-config AWS_HOSTEDZONE_ROOT_DOMAIN
   unset-config AWS_REGION
